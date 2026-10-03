@@ -10,27 +10,27 @@ type IconProps = {
 const menuItems = [
   {
     name: "Overview",
-    path: "/admin",
+    path: "/SatyahiShivheibHai",
     icon: OverviewIcon,
   },
   {
     name: "Orders",
-    path: "/admin/orders",
+    path: "/SatyahiShivheibHai/orders",
     icon: OrdersIcon,
   },
   {
     name: "Products",
-    path: "/admin/products",
+    path: "/SatyahiShivheibHai/products",
     icon: ProductsIcon,
   },
   {
     name: "Customers",
-    path: "/admin/customers",
+    path: "/SatyahiShivheibHai/customers",
     icon: CustomersIcon,
   },
   {
     name: "Reports",
-    path: "/admin/reports",
+    path: "/SatyahiShivheibHai/reports",
     icon: ReportsIcon,
   },
 ];
@@ -77,8 +77,8 @@ export default function AdminLayout({
               const Icon = item.icon;
 
               const isActive =
-                item.path === "/admin"
-                  ? pathname === "/admin"
+                item.path === "/SatyahiShivheibHai"
+                  ? pathname === "/SatyahiShivheibHai"
                   : pathname.startsWith(item.path);
 
               return (

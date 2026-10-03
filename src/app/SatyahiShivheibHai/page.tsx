@@ -227,28 +227,28 @@ export default function AdminPage() {
           <QuickAction
             title="Products"
             description="Manage catalog"
-            href="/admin/products"
+            href="/SatyahiShivheibHai/products"
             icon={PackageIcon}
           />
 
           <QuickAction
             title="Add product"
             description="Create new item"
-            href="/admin/products"
+            href="/SatyahiShivheibHai/products"
             icon={PlusIcon}
           />
 
           <QuickAction
             title="Orders"
             description="Track fulfillment"
-            href="/admin/orders"
+            href="/SatyahiShivheibHai/orders"
             icon={OrdersIcon}
           />
 
           <QuickAction
             title="Customers"
             description="View buyers"
-            href="/admin/customers"
+            href="/SatyahiShivheibHai/customers"
             icon={CustomersIcon}
           />
         </div>
