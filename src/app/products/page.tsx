@@ -36,9 +36,21 @@ export default function CustomerProductsPage() {
   const [maxPrice, setMaxPrice] = useState(10000);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const [showProfile, setShowProfile] = useState(false);
+  const [customerProfile, setCustomerProfile] = useState<any>(null);
   useEffect(() => {
     void loadProducts();
     loadSavedCart();
+    const savedUser =
+      localStorage.getItem("user");
+
+    if (savedUser) {
+      try {
+        setCustomerProfile(
+          JSON.parse(savedUser)
+        );
+      } catch { }
+    }
   }, []);
 
   async function loadProducts() {
@@ -157,28 +169,28 @@ export default function CustomerProductsPage() {
       if (
         existingItem &&
         existingItem.cart_quantity >=
-          product.available_quantity
+        product.available_quantity
       ) {
         return currentCart;
       }
 
       const updatedCart = existingItem
         ? currentCart.map((item) =>
-            item.product_id === product.product_id
-              ? {
-                  ...item,
-                  cart_quantity:
-                    item.cart_quantity + 1,
-                }
-              : item
-          )
+          item.product_id === product.product_id
+            ? {
+              ...item,
+              cart_quantity:
+                item.cart_quantity + 1,
+            }
+            : item
+        )
         : [
-            ...currentCart,
-            {
-              ...product,
-              cart_quantity: 1,
-            },
-          ];
+          ...currentCart,
+          {
+            ...product,
+            cart_quantity: 1,
+          },
+        ];
 
       localStorage.setItem(
         "customer_cart",
@@ -210,6 +222,7 @@ export default function CustomerProductsPage() {
         cartCount={cartCount}
         mobileMenuOpen={mobileMenuOpen}
         setMobileMenuOpen={setMobileMenuOpen}
+        setShowProfile={setShowProfile}
       />
 
       <div className="mx-auto w-full max-w-[1240px] px-4 pb-16 pt-7 sm:px-6 lg:px-8">
@@ -275,6 +288,70 @@ export default function CustomerProductsPage() {
           </section>
         )}
       </div>
+      {showProfile && customerProfile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+
+          <div className="w-full max-w-md rounded-[24px] bg-white p-6 shadow-2xl">
+
+            <div className="flex items-center justify-between">
+
+              <h2 className="text-[22px] font-semibold text-[#101828]">
+                My Profile
+              </h2>
+
+              <button
+                onClick={() =>
+                  setShowProfile(false)
+                }
+                className="text-[#667085]"
+              >
+                ✕
+              </button>
+
+            </div>
+
+            <div className="mt-6 space-y-4">
+
+              <ProfileRow
+                label="Customer ID"
+                value={customerProfile.user_id}
+              />
+
+              <ProfileRow
+                label="Name"
+                value={customerProfile.name}
+              />
+
+              <ProfileRow
+                label="Phone"
+                value={customerProfile.phone}
+              />
+
+              <ProfileRow
+                label="Address"
+                value={customerProfile.address}
+              />
+
+              <ProfileRow
+                label="Role"
+                value={customerProfile.role}
+              />
+
+              <ProfileRow
+                label="Account Status"
+                value={
+                  customerProfile.is_active
+                    ? "Active"
+                    : "Inactive"
+                }
+              />
+
+            </div>
+
+          </div>
+
+        </div>
+      )}
     </main>
   );
 }
@@ -285,13 +362,16 @@ function CustomerHeader({
   cartCount,
   mobileMenuOpen,
   setMobileMenuOpen,
+  setShowProfile,
 }: {
   search: string;
   setSearch: (value: string) => void;
   cartCount: number;
   mobileMenuOpen: boolean;
   setMobileMenuOpen: (value: boolean) => void;
+  setShowProfile: (value: boolean) => void;
 }) {
+
   return (
     <header className="sticky top-0 z-40 border-b border-[#e7ecef] bg-white/95 shadow-[0_1px_4px_rgba(16,24,40,0.04)] backdrop-blur-xl">
       <div className="mx-auto flex h-[72px] max-w-[1240px] items-center gap-5 px-4 sm:px-6 lg:px-8">
@@ -325,10 +405,6 @@ function CustomerHeader({
           <NavigationLink href="/orders">
             Orders
           </NavigationLink>
-
-          <NavigationLink href="/tracking">
-            Tracking
-          </NavigationLink>
         </nav>
 
         <Link href="/cart" aria-label="Shopping cart" className="relative flex h-10 w-10 items-center justify-center rounded-xl text-[#101828] hover:bg-[#f4f7f7]">
@@ -346,6 +422,9 @@ function CustomerHeader({
         <button
           type="button"
           aria-label="Customer profile"
+          onClick={() =>
+            setShowProfile(true)
+          }
           className="hidden h-10 w-10 items-center justify-center rounded-xl text-[#101828] transition hover:bg-[#f4f7f7] sm:flex"
         >
           <UserIcon className="h-5 w-5" />
@@ -392,11 +471,6 @@ function CustomerHeader({
           <MobileNavigationLink href="/orders">
             Orders
           </MobileNavigationLink>
-
-          <MobileNavigationLink href="/tracking">
-            Tracking
-          </MobileNavigationLink>
-
           <MobileNavigationLink href="/cart">
             Cart
           </MobileNavigationLink>
@@ -579,8 +653,8 @@ function ProductCard({
 
   const reachedStockLimit = Boolean(
     cartItem &&
-      cartItem.cart_quantity >=
-        product.available_quantity
+    cartItem.cart_quantity >=
+    product.available_quantity
   );
 
   function getStockLabel() {
@@ -902,7 +976,27 @@ function ArrowIcon({
     </svg>
   );
 }
+function ProfileRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl border border-[#e5e7eb] p-3">
 
+      <p className="text-[10px] uppercase tracking-[0.08em] text-[#98a2b3]">
+        {label}
+      </p>
+
+      <p className="mt-1 text-[13px] font-medium text-[#101828]">
+        {value}
+      </p>
+
+    </div>
+  );
+}
 function PackageIcon({
   className = "",
 }: IconProps) {

@@ -1,40 +1,153 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 type IconProps = {
   className?: string;
 };
 
 export default function AdminPage() {
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [totalCustomers, setTotalCustomers] = useState(0);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [deliveredOrders, setDeliveredOrders] = useState(0);
+  const [revenue, setRevenue] = useState(0);
+
+  async function loadDashboardData() {
+
+    const { count: productCount } =
+      await supabase
+        .from("products")
+        .select("*", {
+          count: "exact",
+          head: true,
+        });
+
+    const { count: customerCount } =
+      await supabase
+        .from("users")
+        .select("*", {
+          count: "exact",
+          head: true,
+        })
+        .eq("role", "CUSTOMER");
+
+    const { data: ordersData } =
+      await supabase
+        .from("orders")
+        .select(
+          "order_id,total_amount,status"
+        );
+
+    const totalOrderCount =
+      ordersData?.length ?? 0;
+
+    const completedOrders =
+      ordersData?.filter(
+        (x) =>
+          x.status === "DELIVERED"
+      ).length ?? 0;
+
+    const totalRevenue =
+      ordersData?.reduce(
+        (sum, order) =>
+          sum +
+          Number(order.total_amount),
+        0
+      ) ?? 0;
+
+    setTotalProducts(
+      productCount ?? 0
+    );
+
+    setTotalCustomers(
+      customerCount ?? 0
+    );
+
+    setTotalOrders(
+      totalOrderCount
+    );
+
+    setDeliveredOrders(
+      completedOrders
+    );
+
+    setRevenue(totalRevenue);
+  }
+  useEffect(() => {
+
+    loadDashboardData();
+
+    const channel = supabase
+      .channel("dashboard-sync")
+
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "products",
+        },
+        () => loadDashboardData()
+      )
+
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+        },
+        () => loadDashboardData()
+      )
+
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "users",
+        },
+        () => loadDashboardData()
+      )
+
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+
+  }, []);
   const metrics = [
     {
       title: "Total products",
-      value: "0",
+      value: totalProducts,
       description: "Live catalogue",
       icon: PackageIcon,
       iconBackground: "bg-[#edf4ff]",
       iconColour: "text-[#2563eb]",
     },
     {
-      title: "Pending orders",
-      value: "0",
-      description: "Awaiting processing",
+      title: "Orders",
+      value: totalOrders,
+      description: "Customer orders",
       icon: OrdersIcon,
       iconBackground: "bg-[#fff4e8]",
       iconColour: "text-[#f97316]",
     },
     {
-      title: "Active customers",
-      value: "0",
-      description: "Enabled accounts",
+      title: "Customers",
+      value: totalCustomers,
+      description: "Registered buyers",
       icon: CustomersIcon,
       iconBackground: "bg-[#faf0ff]",
       iconColour: "text-[#a855f7]",
     },
     {
-      title: "Delivered orders",
-      value: "0",
+      title: "Delivered",
+      value: deliveredOrders,
       description: "Successfully completed",
       icon: DeliveredIcon,
       iconBackground: "bg-[#eafbf7]",
@@ -97,6 +210,49 @@ export default function AdminPage() {
         })}
       </section>
 
+      {/* Quick Actions */}
+
+      <section className="mt-6 rounded-[26px] border border-[#e4e9ec] bg-white p-6 shadow-[0_2px_4px_rgba(16,24,40,0.03),0_16px_36px_rgba(16,24,40,0.05)] sm:p-8">
+        <div>
+          <p className="text-sm font-semibold text-[#009d8b]">
+            Store shortcuts
+          </p>
+
+          <h2 className="mt-1 text-xl font-semibold text-[#101828]">
+            Quick actions
+          </h2>
+        </div>
+
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <QuickAction
+            title="Products"
+            description="Manage catalog"
+            href="/admin/products"
+            icon={PackageIcon}
+          />
+
+          <QuickAction
+            title="Add product"
+            description="Create new item"
+            href="/admin/products"
+            icon={PlusIcon}
+          />
+
+          <QuickAction
+            title="Orders"
+            description="Track fulfillment"
+            href="/admin/orders"
+            icon={OrdersIcon}
+          />
+
+          <QuickAction
+            title="Customers"
+            description="View buyers"
+            href="/admin/customers"
+            icon={CustomersIcon}
+          />
+        </div>
+      </section>
       {/* Main Dashboard Content */}
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(340px,0.75fr)]">
@@ -121,7 +277,10 @@ export default function AdminPage() {
 
           <div className="px-6 py-7 sm:px-8">
             <p className="text-[36px] font-semibold tracking-[-0.04em] text-[#101828]">
-              ₹0.00
+              ₹{revenue.toLocaleString("en-IN", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </p>
 
             <div className="relative mt-8 h-[235px] overflow-hidden rounded-[20px] border border-[#dfeeea] bg-gradient-to-b from-[#f1fbf9] to-[#fbfdfd]">
@@ -217,49 +376,6 @@ export default function AdminPage() {
         </article>
       </section>
 
-      {/* Quick Actions */}
-
-      <section className="mt-6 rounded-[26px] border border-[#e4e9ec] bg-white p-6 shadow-[0_2px_4px_rgba(16,24,40,0.03),0_16px_36px_rgba(16,24,40,0.05)] sm:p-8">
-        <div>
-          <p className="text-sm font-semibold text-[#009d8b]">
-            Store shortcuts
-          </p>
-
-          <h2 className="mt-1 text-xl font-semibold text-[#101828]">
-            Quick actions
-          </h2>
-        </div>
-
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <QuickAction
-            title="Products"
-            description="Manage catalog"
-            href="/admin/products"
-            icon={PackageIcon}
-          />
-
-          <QuickAction
-            title="Add product"
-            description="Create new item"
-            href="/admin/products/new"
-            icon={PlusIcon}
-          />
-
-          <QuickAction
-            title="Orders"
-            description="Track fulfillment"
-            href="/admin/orders"
-            icon={OrdersIcon}
-          />
-
-          <QuickAction
-            title="Customers"
-            description="View buyers"
-            href="/admin/customers"
-            icon={CustomersIcon}
-          />
-        </div>
-      </section>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -68,7 +69,12 @@ type Order = {
   users: CustomerDetails;
   order_items: OrderItem[];
 };
-
+type NewOrderNotification = {
+  order_id: string;
+  customer_id: string;
+  customer_name: string;
+  total_amount: number;
+};
 const ORDER_STATUSES: {
   value: OrderStatus;
   label: string;
@@ -132,6 +138,13 @@ export default function AdminOrdersPage() {
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [
+    newOrderNotification,
+    setNewOrderNotification,
+  ] = useState<NewOrderNotification | null>(null);
+
+  const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notifiedOrderIdsRef = useRef<Set<string>>(new Set());
 
   const loadOrders = useCallback(
     async (showLoader = false) => {
@@ -195,15 +208,138 @@ export default function AdminOrdersPage() {
     []
   );
 
+  const showNewOrderNotification = useCallback(
+    async (orderId: string) => {
+      if (
+        notifiedOrderIdsRef.current.has(orderId)
+      ) {
+        return;
+      }
+
+      notifiedOrderIdsRef.current.add(orderId);
+
+      /*
+        The checkout RPC first inserts the order and
+        then calculates its GST and total.
+  
+        This short delay allows the transaction to
+        finish before loading the notification details.
+      */
+      await new Promise((resolve) => {
+        window.setTimeout(resolve, 700);
+      });
+
+      const { data, error: notificationError } =
+        await supabase
+          .from("orders")
+          .select(`
+          order_id,
+          customer_id,
+          total_amount,
+          users!orders_customer_fk (
+            name
+          )
+        `)
+          .eq("order_id", orderId)
+          .single();
+
+      if (notificationError || !data) {
+        console.error(
+          "Unable to load new order notification:",
+          notificationError
+        );
+
+        setNewOrderNotification({
+          order_id: orderId,
+          customer_id: "",
+          customer_name: "Customer",
+          total_amount: 0,
+        });
+      } else {
+        const relatedCustomer = Array.isArray(
+          data.users
+        )
+          ? data.users[0]
+          : data.users;
+
+        setNewOrderNotification({
+          order_id: data.order_id,
+          customer_id: data.customer_id,
+          customer_name:
+            relatedCustomer?.name ?? "Customer",
+          total_amount: Number(
+            data.total_amount ?? 0
+          ),
+        });
+      }
+
+      if (notificationTimerRef.current) {
+        window.clearTimeout(
+          notificationTimerRef.current
+        );
+      }
+
+      notificationTimerRef.current =
+        setTimeout(() => {
+          setNewOrderNotification(null);
+          notificationTimerRef.current = null;
+        }, 7000);
+    },
+    []
+  );
   useEffect(() => {
     void loadOrders(true);
 
+    const channelName = `admin-live-orders-${Date.now()}`;
+
     const orderChannel = supabase
-      .channel("admin-live-orders")
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
-          event: "*",
+          event: "INSERT",
+          schema: "public",
+          table: "orders",
+        },
+        (payload) => {
+          console.log(
+            "NEW ORDER INSERT EVENT:",
+            payload
+          );
+
+          const insertedOrder = payload.new as {
+            order_id?: string;
+          };
+
+          void loadOrders(false);
+
+          if (insertedOrder.order_id) {
+            void showNewOrderNotification(
+              insertedOrder.order_id
+            );
+          }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "orders",
+        },
+        (payload) => {
+          console.log(
+            "ORDER UPDATE EVENT:",
+            payload
+          );
+
+          void loadOrders(false);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
           schema: "public",
           table: "orders",
         },
@@ -222,12 +358,50 @@ export default function AdminOrdersPage() {
           void loadOrders(false);
         }
       )
-      .subscribe();
+      .subscribe((status, subscribeError) => {
+        console.log(
+          "ORDERS REALTIME STATUS:",
+          status
+        );
+
+        if (subscribeError) {
+          console.error(
+            "ORDERS REALTIME ERROR:",
+            subscribeError
+          );
+        }
+
+        if (status === "SUBSCRIBED") {
+          console.log(
+            "Admin order notifications are ready"
+          );
+        }
+
+        if (
+          status === "CHANNEL_ERROR" ||
+          status === "TIMED_OUT"
+        ) {
+          setError(
+            "Order notification connection failed. Refresh the page and try again."
+          );
+        }
+      });
 
     return () => {
+      if (notificationTimerRef.current) {
+        window.clearTimeout(
+          notificationTimerRef.current
+        );
+
+        notificationTimerRef.current = null;
+      }
+
       void supabase.removeChannel(orderChannel);
     };
-  }, [loadOrders]);
+  }, [
+    loadOrders,
+    showNewOrderNotification,
+  ]);
 
   const filteredOrders = useMemo(() => {
     const searchValue =
@@ -407,744 +581,743 @@ export default function AdminOrdersPage() {
   }
 
   async function downloadBill(order: Order) {
-  try {
-    const { jsPDF } = await import("jspdf");
+    try {
+      const { jsPDF } = await import("jspdf");
 
-    const customer = getCustomer(order.users);
+      const customer = getCustomer(order.users);
 
-    const itemSpace = order.order_items.reduce(
-      (total, item) => {
-        const itemName = getProductName(item);
+      const itemSpace = order.order_items.reduce(
+        (total, item) => {
+          const itemName = getProductName(item);
 
-        const estimatedNameLines = Math.max(
-          1,
-          Math.ceil(itemName.length / 28)
-        );
-
-        return total + estimatedNameLines * 4 + 12;
-      },
-      0
-    );
-
-    const receiptHeight =
-  Math.max(
-    220,
-    170 + itemSpace
-  );
-
-    const pdf = new jsPDF({
-      orientation: "portrait",
-      unit: "mm",
-      format: [100, receiptHeight],
-      compress: true,
-    });
-
-    const pageWidth = 100;
-    const left = 6;
-    const right = 94;
-    const centre = 50;
-
-    let y = 7;
-
-    function drawLine(
-      lineY: number,
-      colour = 220
-    ) {
-      pdf.setDrawColor(
-        colour,
-        colour,
-        colour
-      );
-
-      pdf.setLineWidth(0.25);
-
-      pdf.line(
-        left,
-        lineY,
-        right,
-        lineY
-      );
-    }
-
-    function drawDottedLine(
-      lineY: number
-    ) {
-      pdf.setDrawColor(190, 198, 204);
-      pdf.setLineDashPattern([1, 1], 0);
-      pdf.line(left, lineY, right, lineY);
-      pdf.setLineDashPattern([], 0);
-    }
-
-    function money(
-      value: number | string | null
-    ) {
-      return `Rs. ${Number(
-        value ?? 0
-      ).toLocaleString("en-IN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })}`;
-    }
-
-    function printLabelValue(
-      label: string,
-      value: string,
-      lineY: number,
-      boldValue = false
-    ) {
-      pdf.setFont(
-        "helvetica",
-        "normal"
-      );
-
-      pdf.setFontSize(6.6);
-
-      pdf.setTextColor(102, 112, 133);
-
-      pdf.text(
-        label.toUpperCase(),
-        left,
-        lineY
-      );
-
-      pdf.setFont(
-        "helvetica",
-        boldValue ? "bold" : "normal"
-      );
-
-      pdf.setTextColor(29, 41, 57);
-
-      pdf.text(
-        value,
-        right,
-        lineY,
-        {
-          align: "right",
-          maxWidth: 45,
-        }
-      );
-    }
-
-    // =================================================
-    // LOGO
-    // =================================================
-
-    pdf.setFillColor(15, 118, 110);
-
-    pdf.roundedRect(
-      33,
-      y,
-      14,
-      14,
-      3,
-      3,
-      "F"
-    );
-
-    pdf.setFont(
-      "helvetica",
-      "bold"
-    );
-
-    pdf.setFontSize(11);
-
-    pdf.setTextColor(255, 255, 255);
-
-    pdf.text(
-      "S",
-      centre,
-      y + 9.5,
-      {
-        align: "center",
-      }
-    );
-
-    y += 19;
-
-    // =================================================
-    // BUSINESS HEADER
-    // =================================================
-
-    pdf.setTextColor(16, 24, 40);
-
-    pdf.setFont(
-      "helvetica",
-      "bold"
-    );
-
-    pdf.setFontSize(11);
-
-    pdf.text(
-      "SANKAR ENTERPRISES",
-      centre,
-      y,
-      {
-        align: "center",
-      }
-    );
-
-    y += 4.5;
-
-    pdf.setFont(
-      "helvetica",
-      "normal"
-    );
-
-    pdf.setFontSize(6.3);
-
-    pdf.setTextColor(102, 112, 133);
-
-    pdf.text(
-      "SANITARY & BATHROOM SOLUTIONS",
-      centre,
-      y,
-      {
-        align: "center",
-      }
-    );
-
-    y += 4;
-
-    pdf.setFontSize(5.8);
-
-    pdf.setTextColor(152, 162, 179);
-
-    pdf.text(
-      "Retail Invoice",
-      centre,
-      y,
-      {
-        align: "center",
-      }
-    );
-
-    y += 5;
-
-    drawLine(y);
-
-    y += 5;
-
-    // =================================================
-    // ORDER DETAILS
-    // =================================================
-
-    pdf.setFillColor(245, 248, 248);
-
-    pdf.roundedRect(
-      left,
-      y,
-      right - left,
-      16,
-      2,
-      2,
-      "F"
-    );
-
-    pdf.setTextColor(0, 143, 128);
-
-    pdf.setFont(
-      "helvetica",
-      "bold"
-    );
-
-    pdf.setFontSize(7.3);
-
-    pdf.text(
-      "ORDER",
-      left + 3,
-      y + 4.5
-    );
-
-    pdf.setTextColor(16, 24, 40);
-
-    pdf.setFontSize(9);
-
-    pdf.text(
-      order.order_id,
-      left + 3,
-      y + 10
-    );
-
-    pdf.setFont(
-      "helvetica",
-      "normal"
-    );
-
-    pdf.setFontSize(6.3);
-
-    pdf.setTextColor(102, 112, 133);
-
-    pdf.text(
-      formatDate(order.created_at),
-      right - 3,
-      y + 10,
-      {
-        align: "right",
-      }
-    );
-
-    y += 21;
-
-    // =================================================
-    // CUSTOMER DETAILS
-    // =================================================
-
-    pdf.setFont(
-      "helvetica",
-      "bold"
-    );
-
-    pdf.setFontSize(6.8);
-
-    pdf.setTextColor(16, 24, 40);
-
-    pdf.text(
-      "BILL TO",
-      left,
-      y
-    );
-
-    y += 4;
-
-    pdf.setFontSize(8);
-
-    pdf.text(
-      customer.name ||
-        "Customer",
-      left,
-      y
-    );
-
-    y += 4;
-
-    pdf.setFont(
-      "helvetica",
-      "normal"
-    );
-
-    pdf.setFontSize(6.5);
-
-    pdf.setTextColor(71, 84, 103);
-
-    pdf.text(
-      `Phone: ${
-        customer.phone || "-"
-      }`,
-      left,
-      y
-    );
-
-    y += 4;
-
-    const addressLines =
-      pdf.splitTextToSize(
-        customer.address ||
-          "Address not available",
-        66
-      );
-
-    pdf.text(
-      addressLines,
-      left,
-      y
-    );
-
-    y +=
-      Math.max(
-        addressLines.length,
-        1
-      ) *
-        3.3 +
-      3;
-
-    drawLine(y);
-
-    y += 5;
-
-    // =================================================
-    // ITEM HEADER
-    // =================================================
-
-    pdf.setFillColor(16, 24, 40);
-
-    pdf.roundedRect(
-      left,
-      y,
-      right - left,
-      7,
-      1.5,
-      1.5,
-      "F"
-    );
-
-    pdf.setFont(
-      "helvetica",
-      "bold"
-    );
-
-    pdf.setFontSize(6.2);
-
-    pdf.setTextColor(255, 255, 255);
-
-    pdf.text(
-      "ITEM DETAILS",
-      left + 3,
-      y + 4.5
-    );
-
-    pdf.text(
-      "AMOUNT",
-      right - 3,
-      y + 4.5,
-      {
-        align: "right",
-      }
-    );
-
-    y += 12;
-
-    // =================================================
-    // ORDER ITEMS
-    // =================================================
-
-    order.order_items.forEach(
-      (item, index) => {
-        const itemName =
-          getProductName(item);
-
-        const itemNameLines =
-          pdf.splitTextToSize(
-            itemName,
-            45
+          const estimatedNameLines = Math.max(
+            1,
+            Math.ceil(itemName.length / 28)
           );
 
-        pdf.setFont(
-          "helvetica",
-          "bold"
+          return total + estimatedNameLines * 4 + 12;
+        },
+        0
+      );
+
+      const receiptHeight =
+        Math.max(
+          220,
+          170 + itemSpace
         );
 
-        pdf.setFontSize(7.4);
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: [100, receiptHeight],
+        compress: true,
+      });
 
-        pdf.setTextColor(
-          29,
-          41,
-          57
+      const pageWidth = 100;
+      const left = 6;
+      const right = 94;
+      const centre = 50;
+
+      let y = 7;
+
+      function drawLine(
+        lineY: number,
+        colour = 220
+      ) {
+        pdf.setDrawColor(
+          colour,
+          colour,
+          colour
         );
 
-        pdf.text(
-          itemNameLines,
+        pdf.setLineWidth(0.25);
+
+        pdf.line(
           left,
-          y
-        );
-
-        pdf.text(
-          money(item.line_total),
+          lineY,
           right,
-          y,
-          {
-            align: "right",
-          }
+          lineY
         );
+      }
 
-        y +=
-          Math.max(
-            itemNameLines.length,
-            1
-          ) * 3.5;
+      function drawDottedLine(
+        lineY: number
+      ) {
+        pdf.setDrawColor(190, 198, 204);
+        pdf.setLineDashPattern([1, 1], 0);
+        pdf.line(left, lineY, right, lineY);
+        pdf.setLineDashPattern([], 0);
+      }
 
+      function money(
+        value: number | string | null
+      ) {
+        return `Rs. ${Number(
+          value ?? 0
+        ).toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`;
+      }
+
+      function printLabelValue(
+        label: string,
+        value: string,
+        lineY: number,
+        boldValue = false
+      ) {
         pdf.setFont(
           "helvetica",
           "normal"
         );
 
-        pdf.setFontSize(6.2);
+        pdf.setFontSize(6.6);
 
-        pdf.setTextColor(
-          102,
-          112,
-          133
-        );
+        pdf.setTextColor(102, 112, 133);
 
         pdf.text(
-          `${item.quantity} x ${money(
-            item.price_at_order
-          )}`,
+          label.toUpperCase(),
           left,
-          y
+          lineY
         );
 
-        y += 3.5;
-
-        pdf.text(
-          `GST ${Number(
-            item.gst_rate ?? 0
-          ).toFixed(2)}%`,
-          left,
-          y
+        pdf.setFont(
+          "helvetica",
+          boldValue ? "bold" : "normal"
         );
 
+        pdf.setTextColor(29, 41, 57);
+
         pdf.text(
-          money(item.gst_amount),
+          value,
           right,
-          y,
+          lineY,
           {
             align: "right",
+            maxWidth: 45,
           }
         );
-
-        y += 4;
-
-        if (
-          index <
-          order.order_items.length - 1
-        ) {
-          drawDottedLine(y);
-
-          y += 5;
-        }
       }
-    );
 
-    y += 1;
+      // =================================================
+      // LOGO
+      // =================================================
 
-    drawLine(y);
+      pdf.setFillColor(15, 118, 110);
 
-    y += 6;
-
-    // =================================================
-    // TOTALS
-    // =================================================
-
-    printLabelValue(
-      "Subtotal",
-      money(order.subtotal),
-      y
-    );
-
-    y += 5;
-
-    printLabelValue(
-      "GST",
-      money(order.gst_amount),
-      y
-    );
-
-    y += 5;
-
-    pdf.setFillColor(234, 251, 247);
-
-    pdf.roundedRect(
-      left,
-      y,
-      right - left,
-      12,
-      2,
-      2,
-      "F"
-    );
-
-    pdf.setFont(
-      "helvetica",
-      "bold"
-    );
-
-    pdf.setFontSize(8);
-
-    pdf.setTextColor(0, 111, 101);
-
-    pdf.text(
-      "GRAND TOTAL",
-      left + 3,
-      y + 7.5
-    );
-
-    pdf.setFontSize(9.5);
-
-    pdf.text(
-      money(order.total_amount),
-      right - 3,
-      y + 7.5,
-      {
-        align: "right",
-      }
-    );
-
-    y += 17;
-
-    printLabelValue(
-      "Paid amount",
-      money(order.paid_amount),
-      y,
-      true
-    );
-
-    y += 5;
-
-    const balanceAmount =
-      Math.max(
-        0,
-        Number(order.total_amount) -
-          Number(order.paid_amount)
+      pdf.roundedRect(
+        33,
+        y,
+        14,
+        14,
+        3,
+        3,
+        "F"
       );
 
-    printLabelValue(
-      "Balance",
-      money(balanceAmount),
-      y,
-      true
-    );
+      pdf.setFont(
+        "helvetica",
+        "bold"
+      );
 
-    y += 6;
+      pdf.setFontSize(11);
 
-    drawLine(y);
+      pdf.setTextColor(255, 255, 255);
 
-    y += 6;
+      pdf.text(
+        "S",
+        centre,
+        y + 9.5,
+        {
+          align: "center",
+        }
+      );
 
-    // =================================================
-    // STATUS SECTION
-    // =================================================
+      y += 19;
 
-    pdf.setFillColor(248, 250, 251);
+      // =================================================
+      // BUSINESS HEADER
+      // =================================================
 
-    pdf.roundedRect(
-      left,
-      y,
-      right - left,
-      18,
-      2,
-      2,
-      "F"
-    );
+      pdf.setTextColor(16, 24, 40);
 
-    pdf.setFont(
-      "helvetica",
-      "normal"
-    );
+      pdf.setFont(
+        "helvetica",
+        "bold"
+      );
 
-    pdf.setFontSize(6.2);
+      pdf.setFontSize(11);
 
-    pdf.setTextColor(
-      102,
-      112,
-      133
-    );
+      pdf.text(
+        "SANKAR ENTERPRISES",
+        centre,
+        y,
+        {
+          align: "center",
+        }
+      );
 
-    pdf.text(
-      "PAYMENT STATUS",
-      left + 3,
-      y + 5
-    );
+      y += 4.5;
 
-    pdf.text(
-      "ORDER STATUS",
-      left + 3,
-      y + 12.5
-    );
+      pdf.setFont(
+        "helvetica",
+        "normal"
+      );
 
-    pdf.setFont(
-      "helvetica",
-      "bold"
-    );
+      pdf.setFontSize(6.3);
 
-    pdf.setTextColor(
-      29,
-      41,
-      57
-    );
+      pdf.setTextColor(102, 112, 133);
 
-    pdf.text(
-      getPaymentLabel(
-        order.payment_status
-      ).toUpperCase(),
-      right - 3,
-      y + 5,
-      {
-        align: "right",
-      }
-    );
+      pdf.text(
+        "SANITARY & BATHROOM SOLUTIONS",
+        centre,
+        y,
+        {
+          align: "center",
+        }
+      );
 
-    pdf.text(
-      getOrderStatusLabel(
-        order.status
-      ).toUpperCase(),
-      right - 3,
-      y + 12.5,
-      {
-        align: "right",
-      }
-    );
+      y += 4;
 
-    y += 23;
+      pdf.setFontSize(5.8);
 
-    // =================================================
-    // FOOTER
-    // =================================================
+      pdf.setTextColor(152, 162, 179);
 
-    pdf.setFont(
-      "helvetica",
-      "bold"
-    );
+      pdf.text(
+        "Retail Invoice",
+        centre,
+        y,
+        {
+          align: "center",
+        }
+      );
 
-    pdf.setFontSize(7.2);
+      y += 5;
 
-    pdf.setTextColor(16, 24, 40);
+      drawLine(y);
 
-    pdf.text(
-      "THANK YOU FOR SHOPPING WITH US",
-      centre,
-      y,
-      {
-        align: "center",
-      }
-    );
+      y += 5;
 
-    y += 4;
+      // =================================================
+      // ORDER DETAILS
+      // =================================================
 
-    pdf.setFont(
-      "helvetica",
-      "normal"
-    );
+      pdf.setFillColor(245, 248, 248);
 
-    pdf.setFontSize(5.8);
+      pdf.roundedRect(
+        left,
+        y,
+        right - left,
+        16,
+        2,
+        2,
+        "F"
+      );
 
-    pdf.setTextColor(
-      152,
-      162,
-      179
-    );
+      pdf.setTextColor(0, 143, 128);
 
-    pdf.text(
-      "Please keep this invoice for future reference.",
-      centre,
-      y,
-      {
-        align: "center",
-      }
-    );
+      pdf.setFont(
+        "helvetica",
+        "bold"
+      );
 
-    y += 4;
+      pdf.setFontSize(7.3);
 
-    pdf.text(
-      `Invoice generated for ${order.order_id}`,
-      centre,
-      y,
-      {
-        align: "center",
-      }
-    );
-    y += 10;
+      pdf.text(
+        "ORDER",
+        left + 3,
+        y + 4.5
+      );
 
-    pdf.save(
-      `${order.order_id}-bill.pdf`
-    );
-  } catch (billError) {
-    console.error(billError);
+      pdf.setTextColor(16, 24, 40);
 
-    setError(
-      "Unable to generate the bill. Please try again."
-    );
+      pdf.setFontSize(9);
+
+      pdf.text(
+        order.order_id,
+        left + 3,
+        y + 10
+      );
+
+      pdf.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      pdf.setFontSize(6.3);
+
+      pdf.setTextColor(102, 112, 133);
+
+      pdf.text(
+        formatDate(order.created_at),
+        right - 3,
+        y + 10,
+        {
+          align: "right",
+        }
+      );
+
+      y += 21;
+
+      // =================================================
+      // CUSTOMER DETAILS
+      // =================================================
+
+      pdf.setFont(
+        "helvetica",
+        "bold"
+      );
+
+      pdf.setFontSize(6.8);
+
+      pdf.setTextColor(16, 24, 40);
+
+      pdf.text(
+        "BILL TO",
+        left,
+        y
+      );
+
+      y += 4;
+
+      pdf.setFontSize(8);
+
+      pdf.text(
+        customer.name ||
+        "Customer",
+        left,
+        y
+      );
+
+      y += 4;
+
+      pdf.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      pdf.setFontSize(6.5);
+
+      pdf.setTextColor(71, 84, 103);
+
+      pdf.text(
+        `Phone: ${customer.phone || "-"
+        }`,
+        left,
+        y
+      );
+
+      y += 4;
+
+      const addressLines =
+        pdf.splitTextToSize(
+          customer.address ||
+          "Address not available",
+          66
+        );
+
+      pdf.text(
+        addressLines,
+        left,
+        y
+      );
+
+      y +=
+        Math.max(
+          addressLines.length,
+          1
+        ) *
+        3.3 +
+        3;
+
+      drawLine(y);
+
+      y += 5;
+
+      // =================================================
+      // ITEM HEADER
+      // =================================================
+
+      pdf.setFillColor(16, 24, 40);
+
+      pdf.roundedRect(
+        left,
+        y,
+        right - left,
+        7,
+        1.5,
+        1.5,
+        "F"
+      );
+
+      pdf.setFont(
+        "helvetica",
+        "bold"
+      );
+
+      pdf.setFontSize(6.2);
+
+      pdf.setTextColor(255, 255, 255);
+
+      pdf.text(
+        "ITEM DETAILS",
+        left + 3,
+        y + 4.5
+      );
+
+      pdf.text(
+        "AMOUNT",
+        right - 3,
+        y + 4.5,
+        {
+          align: "right",
+        }
+      );
+
+      y += 12;
+
+      // =================================================
+      // ORDER ITEMS
+      // =================================================
+
+      order.order_items.forEach(
+        (item, index) => {
+          const itemName =
+            getProductName(item);
+
+          const itemNameLines =
+            pdf.splitTextToSize(
+              itemName,
+              45
+            );
+
+          pdf.setFont(
+            "helvetica",
+            "bold"
+          );
+
+          pdf.setFontSize(7.4);
+
+          pdf.setTextColor(
+            29,
+            41,
+            57
+          );
+
+          pdf.text(
+            itemNameLines,
+            left,
+            y
+          );
+
+          pdf.text(
+            money(item.line_total),
+            right,
+            y,
+            {
+              align: "right",
+            }
+          );
+
+          y +=
+            Math.max(
+              itemNameLines.length,
+              1
+            ) * 3.5;
+
+          pdf.setFont(
+            "helvetica",
+            "normal"
+          );
+
+          pdf.setFontSize(6.2);
+
+          pdf.setTextColor(
+            102,
+            112,
+            133
+          );
+
+          pdf.text(
+            `${item.quantity} x ${money(
+              item.price_at_order
+            )}`,
+            left,
+            y
+          );
+
+          y += 3.5;
+
+          pdf.text(
+            `GST ${Number(
+              item.gst_rate ?? 0
+            ).toFixed(2)}%`,
+            left,
+            y
+          );
+
+          pdf.text(
+            money(item.gst_amount),
+            right,
+            y,
+            {
+              align: "right",
+            }
+          );
+
+          y += 4;
+
+          if (
+            index <
+            order.order_items.length - 1
+          ) {
+            drawDottedLine(y);
+
+            y += 5;
+          }
+        }
+      );
+
+      y += 1;
+
+      drawLine(y);
+
+      y += 6;
+
+      // =================================================
+      // TOTALS
+      // =================================================
+
+      printLabelValue(
+        "Subtotal",
+        money(order.subtotal),
+        y
+      );
+
+      y += 5;
+
+      printLabelValue(
+        "GST",
+        money(order.gst_amount),
+        y
+      );
+
+      y += 5;
+
+      pdf.setFillColor(234, 251, 247);
+
+      pdf.roundedRect(
+        left,
+        y,
+        right - left,
+        12,
+        2,
+        2,
+        "F"
+      );
+
+      pdf.setFont(
+        "helvetica",
+        "bold"
+      );
+
+      pdf.setFontSize(8);
+
+      pdf.setTextColor(0, 111, 101);
+
+      pdf.text(
+        "GRAND TOTAL",
+        left + 3,
+        y + 7.5
+      );
+
+      pdf.setFontSize(9.5);
+
+      pdf.text(
+        money(order.total_amount),
+        right - 3,
+        y + 7.5,
+        {
+          align: "right",
+        }
+      );
+
+      y += 17;
+
+      printLabelValue(
+        "Paid amount",
+        money(order.paid_amount),
+        y,
+        true
+      );
+
+      y += 5;
+
+      const balanceAmount =
+        Math.max(
+          0,
+          Number(order.total_amount) -
+          Number(order.paid_amount)
+        );
+
+      printLabelValue(
+        "Balance",
+        money(balanceAmount),
+        y,
+        true
+      );
+
+      y += 6;
+
+      drawLine(y);
+
+      y += 6;
+
+      // =================================================
+      // STATUS SECTION
+      // =================================================
+
+      pdf.setFillColor(248, 250, 251);
+
+      pdf.roundedRect(
+        left,
+        y,
+        right - left,
+        18,
+        2,
+        2,
+        "F"
+      );
+
+      pdf.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      pdf.setFontSize(6.2);
+
+      pdf.setTextColor(
+        102,
+        112,
+        133
+      );
+
+      pdf.text(
+        "PAYMENT STATUS",
+        left + 3,
+        y + 5
+      );
+
+      pdf.text(
+        "ORDER STATUS",
+        left + 3,
+        y + 12.5
+      );
+
+      pdf.setFont(
+        "helvetica",
+        "bold"
+      );
+
+      pdf.setTextColor(
+        29,
+        41,
+        57
+      );
+
+      pdf.text(
+        getPaymentLabel(
+          order.payment_status
+        ).toUpperCase(),
+        right - 3,
+        y + 5,
+        {
+          align: "right",
+        }
+      );
+
+      pdf.text(
+        getOrderStatusLabel(
+          order.status
+        ).toUpperCase(),
+        right - 3,
+        y + 12.5,
+        {
+          align: "right",
+        }
+      );
+
+      y += 23;
+
+      // =================================================
+      // FOOTER
+      // =================================================
+
+      pdf.setFont(
+        "helvetica",
+        "bold"
+      );
+
+      pdf.setFontSize(7.2);
+
+      pdf.setTextColor(16, 24, 40);
+
+      pdf.text(
+        "THANK YOU FOR SHOPPING WITH US",
+        centre,
+        y,
+        {
+          align: "center",
+        }
+      );
+
+      y += 4;
+
+      pdf.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      pdf.setFontSize(5.8);
+
+      pdf.setTextColor(
+        152,
+        162,
+        179
+      );
+
+      pdf.text(
+        "Please keep this invoice for future reference.",
+        centre,
+        y,
+        {
+          align: "center",
+        }
+      );
+
+      y += 4;
+
+      pdf.text(
+        `Invoice generated for ${order.order_id}`,
+        centre,
+        y,
+        {
+          align: "center",
+        }
+      );
+      y += 10;
+
+      pdf.save(
+        `${order.order_id}-bill.pdf`
+      );
+    } catch (billError) {
+      console.error(billError);
+
+      setError(
+        "Unable to generate the bill. Please try again."
+      );
+    }
   }
-}
 
   function clearFilters() {
     setSearch("");
@@ -1154,6 +1327,121 @@ export default function AdminOrdersPage() {
 
   return (
     <div className="text-[#101828]">
+      {newOrderNotification && (
+        <div className="fixed right-5 top-5 z-[100] w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-[20px] border border-[#b7e4dc] bg-white shadow-[0_24px_60px_rgba(16,24,40,0.20)]">
+          <div className="h-1 bg-gradient-to-r from-[#009d8b] to-[#5dd7ca]" />
+
+          <div className="p-5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#eafbf7] text-[#008f80]">
+                <NotificationBellIcon className="h-5 w-5" />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#009d8b]">
+                      New order received
+                    </p>
+
+                    <p className="mt-1 text-[16px] font-semibold text-[#101828]">
+                      {newOrderNotification.order_id}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    aria-label="Close notification"
+                    onClick={() => {
+                      if (
+                        notificationTimerRef.current
+                      ) {
+                        window.clearTimeout(
+                          notificationTimerRef.current
+                        );
+
+                        notificationTimerRef.current =
+                          null;
+                      }
+
+                      setNewOrderNotification(null);
+                    }}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[18px] leading-none text-[#98a2b3] transition hover:bg-[#f2f4f7] hover:text-[#475467]"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <p className="mt-2 truncate text-[12px] font-medium text-[#475467]">
+                  {
+                    newOrderNotification.customer_name
+                  }
+                </p>
+
+                {newOrderNotification.customer_id && (
+                  <p className="mt-0.5 text-[9px] text-[#98a2b3]">
+                    {
+                      newOrderNotification.customer_id
+                    }
+                  </p>
+                )}
+
+                <div className="mt-3 flex items-center justify-between rounded-xl bg-[#f7faf9] px-3 py-2.5">
+                  <span className="text-[10px] font-medium text-[#667085]">
+                    Order value
+                  </span>
+
+                  <span className="text-[13px] font-semibold text-[#101828]">
+                    ₹
+                    {formatMoney(
+                      newOrderNotification.total_amount
+                    )}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch(
+                      newOrderNotification.order_id
+                    );
+
+                    setStatusFilter("ALL");
+                    setPaymentFilter("ALL");
+                    setNewOrderNotification(null);
+
+                    if (
+                      notificationTimerRef.current
+                    ) {
+                      window.clearTimeout(
+                        notificationTimerRef.current
+                      );
+
+                      notificationTimerRef.current =
+                        null;
+                    }
+
+                    window.setTimeout(() => {
+                      document
+                        .getElementById(
+                          "admin-orders-table"
+                        )
+                        ?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "start",
+                        });
+                    }, 100);
+                  }}
+                  className="mt-3 inline-flex items-center gap-1 text-[10px] font-semibold text-[#008f80] transition hover:text-[#006f65]"
+                >
+                  View this order
+                  <span>→</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <section className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[12px] font-semibold text-[#009d8b]">
@@ -1191,8 +1479,8 @@ export default function AdminOrdersPage() {
       {(error || message) && (
         <div
           className={`mb-5 rounded-xl border px-4 py-3 text-[12px] ${error
-              ? "border-red-200 bg-red-50 text-red-700"
-              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+            ? "border-red-200 bg-red-50 text-red-700"
+            : "border-emerald-200 bg-emerald-50 text-emerald-700"
             }`}
         >
           {error || message}
@@ -1271,7 +1559,7 @@ export default function AdminOrdersPage() {
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-[22px] border border-[#e1e7ea] bg-white shadow-[0_2px_8px_rgba(16,24,40,0.04)]">
+      <section id="admin-orders-table" className="scroll-mt-24 overflow-hidden rounded-[22px] border border-[#e1e7ea] bg-white shadow-[0_2px_8px_rgba(16,24,40,0.04)]">
         <div className="flex items-center justify-between border-b border-[#edf1f2] px-5 py-4">
           <p className="text-[12px] text-[#667085]">
             Showing {filteredOrders.length} of{" "}
@@ -1762,6 +2050,35 @@ function drawReceiptLine(
   pdf.line(5, y, 75, y);
 }
 
+function NotificationBellIcon({
+  className = "",
+}: {
+  className?: string;
+}) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+
+      <path d="M10 21h4" />
+
+      <circle
+        cx="18"
+        cy="5"
+        r="3"
+        fill="currentColor"
+        stroke="white"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
 const controlClass =
   "w-full rounded-xl border border-[#dfe5e8] bg-[#fbfcfc] px-4 py-3 text-[12px] text-[#101828] outline-none focus:border-[#81cdc5] focus:bg-white focus:ring-4 focus:ring-[#e6f6f3]";
 
