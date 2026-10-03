@@ -58,8 +58,8 @@ export default function AdminLayout({
             <img src="/SE_logo.png" alt="Logo" className="w-10 h-10" />
 
             <div>
-              <h1 className="text-[16.4px] font-semibold leading-5 tracking-[-0.01em] text-[#101828]">
-                Sankar Enterprises
+              <h1 className="text-[15px] font-semibold leading-5 tracking-[-0.01em] text-[#101828]">
+                Shankar Enterprises
               </h1>
             </div>
           </div>

@@ -379,7 +379,7 @@ function CustomerHeader({
           <img src="/SE_logo.png" alt="Logo" className="w-10 h-10" />
 
           <span className="hidden text-[15px] font-semibold text-[#101828] sm:block">
-            Sankar Enterprises
+            Shankar Enterprises
           </span>
         </Link>
 

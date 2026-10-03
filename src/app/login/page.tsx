@@ -49,7 +49,7 @@ export default function LoginPage() {
           <img src="/SE_logo.png" alt="Logo" className="w-16 h-16" />
 
           <h1 className="mt-4 text-sm tracking-[4px] font-semibold text-teal-600 uppercase">
-            Sankar Enterprises
+            Shankar Enterprises
           </h1>
 
           <h1 className="mt-4 text-4xl font-semibold text-gray-900">

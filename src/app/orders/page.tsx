@@ -202,10 +202,10 @@ export default function CustomerOrdersPage() {
       <header className="sticky top-0 z-30 border-b border-[#e7ecef] bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-[70px] max-w-[1100px] items-center justify-between px-4 sm:px-6">
           <Link href="/products" className="flex items-center gap-3">
-            <img src="/SE_logo.png" alt="Sankar Enterprises" className="h-10 w-10 object-contain" />
+            <img src="/SE_logo.png" alt="Shankar Enterprises" className="h-10 w-10 object-contain" />
 
             <span className="text-[15px] font-semibold">
-              Sankar Enterprises
+              Shankar Enterprises
             </span>
           </Link>
 

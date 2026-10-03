@@ -612,6 +612,12 @@ export default function AdminOrdersPage() {
         format: [100, receiptHeight],
         compress: true,
       });
+      const logo = new Image();
+      logo.src = "/SE_logo.png";
+
+      await new Promise((resolve) => {
+        logo.onload = resolve;
+      });
 
       const pageWidth = 100;
       const left = 6;
@@ -703,37 +709,16 @@ export default function AdminOrdersPage() {
       // LOGO
       // =================================================
 
-      pdf.setFillColor(15, 118, 110);
-
-      pdf.roundedRect(
-        33,
+      pdf.addImage(
+        logo,
+        "PNG",
+        35,
         y,
-        14,
-        14,
-        3,
-        3,
-        "F"
+        30,
+        18
       );
 
-      pdf.setFont(
-        "helvetica",
-        "bold"
-      );
-
-      pdf.setFontSize(11);
-
-      pdf.setTextColor(255, 255, 255);
-
-      pdf.text(
-        "S",
-        centre,
-        y + 9.5,
-        {
-          align: "center",
-        }
-      );
-
-      y += 19;
+      y += 24;
 
       // =================================================
       // BUSINESS HEADER
@@ -749,7 +734,7 @@ export default function AdminOrdersPage() {
       pdf.setFontSize(11);
 
       pdf.text(
-        "SANKAR ENTERPRISES",
+        "SHANKAR ENTERPRISES",
         centre,
         y,
         {

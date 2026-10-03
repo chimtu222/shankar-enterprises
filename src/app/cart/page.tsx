@@ -299,9 +299,9 @@ export default function CartPage() {
           <Link
             href="/products"
             className="flex items-center text-[#101828]"
-            aria-label="Sankar Enterprises">
+            aria-label="Shankar Enterprises">
             <img src="/SE_logo.png" height={40} width={40} alt="" />
-            <span>Sankar Enterprises</span>
+            <span>Shankar Enterprises</span>
           </Link>
 
           <Link href="/products">

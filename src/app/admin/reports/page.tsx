@@ -429,7 +429,7 @@ export default function AdminReportsPage() {
       const summaryRows = [
         {
           Metric: "Business",
-          Value: "Sankar Enterprises",
+          Value: "Shankar Enterprises",
         },
         {
           Metric: "Report start date",
