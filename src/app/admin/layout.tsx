@@ -55,18 +55,12 @@ export default function AdminLayout({
 
         <div className="flex h-[76px] shrink-0 items-center border-b border-[#edf1f0] px-5">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#137bff] to-[#1763c5] text-lg font-bold text-white shadow-sm">
-              S
-            </div>
+            <img src="/SE_logo.png" alt="Logo" className="w-10 h-10" />
 
             <div>
-              <p className="text-[15px] font-semibold leading-5 tracking-[-0.01em] text-[#101828]">
-                Sankar
-              </p>
-
-              <p className="text-[15px] font-semibold leading-5 tracking-[-0.01em] text-[#101828]">
-                Enterprises
-              </p>
+              <h1 className="text-[16.4px] font-semibold leading-5 tracking-[-0.01em] text-[#101828]">
+                Sankar Enterprises
+              </h1>
             </div>
           </div>
         </div>

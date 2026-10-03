@@ -1,0 +1,1769 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import { supabase } from "@/lib/supabase";
+
+type OrderStatus =
+  | "PENDING"
+  | "IN_PROCESS"
+  | "PACKED"
+  | "IN_TRANSIT"
+  | "DELIVERED"
+  | "CANCELLED";
+
+type PaymentStatus =
+  | "NOT_PAID"
+  | "PARTIALLY_PAID"
+  | "PAID";
+
+type OrderItem = {
+  order_item_id: string;
+  product_id: string;
+  product_name_snapshot: string | null;
+  quantity: number;
+  price_at_order: number;
+  gst_rate: number;
+  gst_amount: number;
+  line_total: number;
+  products:
+  | {
+    product_name: string;
+  }
+  | {
+    product_name: string;
+  }[]
+  | null;
+};
+
+type CustomerDetails =
+  | {
+    name: string;
+    phone: string;
+    address: string;
+  }
+  | {
+    name: string;
+    phone: string;
+    address: string;
+  }[]
+  | null;
+
+type Order = {
+  order_id: string;
+  customer_id: string;
+  subtotal: number;
+  gst_amount: number;
+  total_amount: number;
+  status: OrderStatus;
+  payment_status: PaymentStatus;
+  paid_amount: number;
+  created_at: string;
+  updated_at: string;
+  users: CustomerDetails;
+  order_items: OrderItem[];
+};
+
+const ORDER_STATUSES: {
+  value: OrderStatus;
+  label: string;
+}[] = [
+    {
+      value: "PENDING",
+      label: "Pending",
+    },
+    {
+      value: "IN_PROCESS",
+      label: "In process",
+    },
+    {
+      value: "PACKED",
+      label: "Packed",
+    },
+    {
+      value: "IN_TRANSIT",
+      label: "In transit",
+    },
+    {
+      value: "DELIVERED",
+      label: "Delivered",
+    },
+    {
+      value: "CANCELLED",
+      label: "Cancelled",
+    },
+  ];
+
+const PAYMENT_STATUSES: {
+  value: PaymentStatus;
+  label: string;
+}[] = [
+    {
+      value: "NOT_PAID",
+      label: "Not paid",
+    },
+    {
+      value: "PARTIALLY_PAID",
+      label: "Partially paid",
+    },
+    {
+      value: "PAID",
+      label: "Paid",
+    },
+  ];
+
+export default function AdminOrdersPage() {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] =
+    useState("ALL");
+  const [paymentFilter, setPaymentFilter] =
+    useState("ALL");
+
+  const [updatingOrderId, setUpdatingOrderId] =
+    useState<string | null>(null);
+
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const loadOrders = useCallback(
+    async (showLoader = false) => {
+      if (showLoader) {
+        setLoading(true);
+      }
+
+      const { data, error: loadError } =
+        await supabase
+          .from("orders")
+          .select(`
+            order_id,
+            customer_id,
+            subtotal,
+            gst_amount,
+            total_amount,
+            status,
+            payment_status,
+            paid_amount,
+            created_at,
+            updated_at,
+            users!orders_customer_fk (
+              name,
+              phone,
+              address
+            ),
+            order_items (
+              order_item_id,
+              product_id,
+              product_name_snapshot,
+              quantity,
+              price_at_order,
+              gst_rate,
+              gst_amount,
+              line_total,
+              products (
+                product_name
+              )
+            )
+          `)
+          .order("created_at", {
+            ascending: false,
+          });
+
+      if (loadError) {
+        console.error(loadError);
+        setError(loadError.message);
+        setOrders([]);
+      } else {
+        setOrders(
+          (data ?? []) as unknown as Order[]
+        );
+
+        setError("");
+      }
+
+      if (showLoader) {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    void loadOrders(true);
+
+    const orderChannel = supabase
+      .channel("admin-live-orders")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+        },
+        () => {
+          void loadOrders(false);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "order_items",
+        },
+        () => {
+          void loadOrders(false);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(orderChannel);
+    };
+  }, [loadOrders]);
+
+  const filteredOrders = useMemo(() => {
+    const searchValue =
+      search.trim().toLowerCase();
+
+    return orders.filter((order) => {
+      const customer = getCustomer(order.users);
+
+      const itemText = order.order_items
+        .map((item) =>
+          getProductName(item).toLowerCase()
+        )
+        .join(" ");
+
+      const matchesSearch =
+        searchValue === "" ||
+        order.order_id
+          .toLowerCase()
+          .includes(searchValue) ||
+        order.customer_id
+          .toLowerCase()
+          .includes(searchValue) ||
+        customer.name
+          .toLowerCase()
+          .includes(searchValue) ||
+        customer.phone.includes(searchValue) ||
+        itemText.includes(searchValue);
+
+      const matchesOrderStatus =
+        statusFilter === "ALL" ||
+        order.status === statusFilter;
+
+      const matchesPaymentStatus =
+        paymentFilter === "ALL" ||
+        order.payment_status === paymentFilter;
+
+      return (
+        matchesSearch &&
+        matchesOrderStatus &&
+        matchesPaymentStatus
+      );
+    });
+  }, [
+    orders,
+    search,
+    statusFilter,
+    paymentFilter,
+  ]);
+
+  const statistics = useMemo(() => {
+    return {
+      total: orders.length,
+
+      pending: orders.filter(
+        (order) =>
+          order.status === "PENDING" ||
+          order.status === "IN_PROCESS"
+      ).length,
+
+      transit: orders.filter(
+        (order) =>
+          order.status === "IN_TRANSIT"
+      ).length,
+
+      delivered: orders.filter(
+        (order) =>
+          order.status === "DELIVERED"
+      ).length,
+    };
+  }, [orders]);
+
+  async function updateOrderStatus(
+    order: Order,
+    newStatus: OrderStatus
+  ) {
+    setUpdatingOrderId(order.order_id);
+    setError("");
+    setMessage("");
+
+    const { error: updateError } =
+      await supabase
+        .from("orders")
+        .update({
+          status: newStatus,
+        })
+        .eq("order_id", order.order_id);
+
+    if (updateError) {
+      setError(updateError.message);
+    } else {
+      setMessage(
+        `${order.order_id} order status updated.`
+      );
+
+      await loadOrders(false);
+    }
+
+    setUpdatingOrderId(null);
+  }
+
+  async function updatePaymentStatus(
+    order: Order,
+    newStatus: PaymentStatus
+  ) {
+    setError("");
+    setMessage("");
+
+    let paidAmount = Number(order.paid_amount);
+
+    if (newStatus === "NOT_PAID") {
+      paidAmount = 0;
+    }
+
+    if (newStatus === "PAID") {
+      paidAmount = Number(order.total_amount);
+    }
+
+    if (newStatus === "PARTIALLY_PAID") {
+      const enteredAmount = window.prompt(
+        `Enter the amount received for ${order.order_id}. Total order amount is ₹${formatMoney(
+          order.total_amount
+        )}`,
+        String(
+          Number(order.paid_amount) > 0
+            ? order.paid_amount
+            : ""
+        )
+      );
+
+      if (enteredAmount === null) {
+        return;
+      }
+
+      const numericAmount =
+        Number(enteredAmount);
+
+      if (
+        Number.isNaN(numericAmount) ||
+        numericAmount <= 0 ||
+        numericAmount >=
+        Number(order.total_amount)
+      ) {
+        setError(
+          `Partial payment must be greater than ₹0 and less than ₹${formatMoney(
+            order.total_amount
+          )}.`
+        );
+
+        return;
+      }
+
+      paidAmount = numericAmount;
+    }
+
+    setUpdatingOrderId(order.order_id);
+
+    const { error: updateError } =
+      await supabase
+        .from("orders")
+        .update({
+          payment_status: newStatus,
+          paid_amount: paidAmount,
+        })
+        .eq("order_id", order.order_id);
+
+    if (updateError) {
+      setError(updateError.message);
+    } else {
+      setMessage(
+        `${order.order_id} payment status updated.`
+      );
+
+      await loadOrders(false);
+    }
+
+    setUpdatingOrderId(null);
+  }
+
+  async function downloadBill(order: Order) {
+  try {
+    const { jsPDF } = await import("jspdf");
+
+    const customer = getCustomer(order.users);
+
+    const itemSpace = order.order_items.reduce(
+      (total, item) => {
+        const itemName = getProductName(item);
+
+        const estimatedNameLines = Math.max(
+          1,
+          Math.ceil(itemName.length / 28)
+        );
+
+        return total + estimatedNameLines * 4 + 12;
+      },
+      0
+    );
+
+    const receiptHeight =
+  Math.max(
+    220,
+    170 + itemSpace
+  );
+
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: [100, receiptHeight],
+      compress: true,
+    });
+
+    const pageWidth = 100;
+    const left = 6;
+    const right = 94;
+    const centre = 50;
+
+    let y = 7;
+
+    function drawLine(
+      lineY: number,
+      colour = 220
+    ) {
+      pdf.setDrawColor(
+        colour,
+        colour,
+        colour
+      );
+
+      pdf.setLineWidth(0.25);
+
+      pdf.line(
+        left,
+        lineY,
+        right,
+        lineY
+      );
+    }
+
+    function drawDottedLine(
+      lineY: number
+    ) {
+      pdf.setDrawColor(190, 198, 204);
+      pdf.setLineDashPattern([1, 1], 0);
+      pdf.line(left, lineY, right, lineY);
+      pdf.setLineDashPattern([], 0);
+    }
+
+    function money(
+      value: number | string | null
+    ) {
+      return `Rs. ${Number(
+        value ?? 0
+      ).toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+    }
+
+    function printLabelValue(
+      label: string,
+      value: string,
+      lineY: number,
+      boldValue = false
+    ) {
+      pdf.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      pdf.setFontSize(6.6);
+
+      pdf.setTextColor(102, 112, 133);
+
+      pdf.text(
+        label.toUpperCase(),
+        left,
+        lineY
+      );
+
+      pdf.setFont(
+        "helvetica",
+        boldValue ? "bold" : "normal"
+      );
+
+      pdf.setTextColor(29, 41, 57);
+
+      pdf.text(
+        value,
+        right,
+        lineY,
+        {
+          align: "right",
+          maxWidth: 45,
+        }
+      );
+    }
+
+    // =================================================
+    // LOGO
+    // =================================================
+
+    pdf.setFillColor(15, 118, 110);
+
+    pdf.roundedRect(
+      33,
+      y,
+      14,
+      14,
+      3,
+      3,
+      "F"
+    );
+
+    pdf.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    pdf.setFontSize(11);
+
+    pdf.setTextColor(255, 255, 255);
+
+    pdf.text(
+      "S",
+      centre,
+      y + 9.5,
+      {
+        align: "center",
+      }
+    );
+
+    y += 19;
+
+    // =================================================
+    // BUSINESS HEADER
+    // =================================================
+
+    pdf.setTextColor(16, 24, 40);
+
+    pdf.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    pdf.setFontSize(11);
+
+    pdf.text(
+      "SANKAR ENTERPRISES",
+      centre,
+      y,
+      {
+        align: "center",
+      }
+    );
+
+    y += 4.5;
+
+    pdf.setFont(
+      "helvetica",
+      "normal"
+    );
+
+    pdf.setFontSize(6.3);
+
+    pdf.setTextColor(102, 112, 133);
+
+    pdf.text(
+      "SANITARY & BATHROOM SOLUTIONS",
+      centre,
+      y,
+      {
+        align: "center",
+      }
+    );
+
+    y += 4;
+
+    pdf.setFontSize(5.8);
+
+    pdf.setTextColor(152, 162, 179);
+
+    pdf.text(
+      "Retail Invoice",
+      centre,
+      y,
+      {
+        align: "center",
+      }
+    );
+
+    y += 5;
+
+    drawLine(y);
+
+    y += 5;
+
+    // =================================================
+    // ORDER DETAILS
+    // =================================================
+
+    pdf.setFillColor(245, 248, 248);
+
+    pdf.roundedRect(
+      left,
+      y,
+      right - left,
+      16,
+      2,
+      2,
+      "F"
+    );
+
+    pdf.setTextColor(0, 143, 128);
+
+    pdf.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    pdf.setFontSize(7.3);
+
+    pdf.text(
+      "ORDER",
+      left + 3,
+      y + 4.5
+    );
+
+    pdf.setTextColor(16, 24, 40);
+
+    pdf.setFontSize(9);
+
+    pdf.text(
+      order.order_id,
+      left + 3,
+      y + 10
+    );
+
+    pdf.setFont(
+      "helvetica",
+      "normal"
+    );
+
+    pdf.setFontSize(6.3);
+
+    pdf.setTextColor(102, 112, 133);
+
+    pdf.text(
+      formatDate(order.created_at),
+      right - 3,
+      y + 10,
+      {
+        align: "right",
+      }
+    );
+
+    y += 21;
+
+    // =================================================
+    // CUSTOMER DETAILS
+    // =================================================
+
+    pdf.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    pdf.setFontSize(6.8);
+
+    pdf.setTextColor(16, 24, 40);
+
+    pdf.text(
+      "BILL TO",
+      left,
+      y
+    );
+
+    y += 4;
+
+    pdf.setFontSize(8);
+
+    pdf.text(
+      customer.name ||
+        "Customer",
+      left,
+      y
+    );
+
+    y += 4;
+
+    pdf.setFont(
+      "helvetica",
+      "normal"
+    );
+
+    pdf.setFontSize(6.5);
+
+    pdf.setTextColor(71, 84, 103);
+
+    pdf.text(
+      `Phone: ${
+        customer.phone || "-"
+      }`,
+      left,
+      y
+    );
+
+    y += 4;
+
+    const addressLines =
+      pdf.splitTextToSize(
+        customer.address ||
+          "Address not available",
+        66
+      );
+
+    pdf.text(
+      addressLines,
+      left,
+      y
+    );
+
+    y +=
+      Math.max(
+        addressLines.length,
+        1
+      ) *
+        3.3 +
+      3;
+
+    drawLine(y);
+
+    y += 5;
+
+    // =================================================
+    // ITEM HEADER
+    // =================================================
+
+    pdf.setFillColor(16, 24, 40);
+
+    pdf.roundedRect(
+      left,
+      y,
+      right - left,
+      7,
+      1.5,
+      1.5,
+      "F"
+    );
+
+    pdf.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    pdf.setFontSize(6.2);
+
+    pdf.setTextColor(255, 255, 255);
+
+    pdf.text(
+      "ITEM DETAILS",
+      left + 3,
+      y + 4.5
+    );
+
+    pdf.text(
+      "AMOUNT",
+      right - 3,
+      y + 4.5,
+      {
+        align: "right",
+      }
+    );
+
+    y += 12;
+
+    // =================================================
+    // ORDER ITEMS
+    // =================================================
+
+    order.order_items.forEach(
+      (item, index) => {
+        const itemName =
+          getProductName(item);
+
+        const itemNameLines =
+          pdf.splitTextToSize(
+            itemName,
+            45
+          );
+
+        pdf.setFont(
+          "helvetica",
+          "bold"
+        );
+
+        pdf.setFontSize(7.4);
+
+        pdf.setTextColor(
+          29,
+          41,
+          57
+        );
+
+        pdf.text(
+          itemNameLines,
+          left,
+          y
+        );
+
+        pdf.text(
+          money(item.line_total),
+          right,
+          y,
+          {
+            align: "right",
+          }
+        );
+
+        y +=
+          Math.max(
+            itemNameLines.length,
+            1
+          ) * 3.5;
+
+        pdf.setFont(
+          "helvetica",
+          "normal"
+        );
+
+        pdf.setFontSize(6.2);
+
+        pdf.setTextColor(
+          102,
+          112,
+          133
+        );
+
+        pdf.text(
+          `${item.quantity} x ${money(
+            item.price_at_order
+          )}`,
+          left,
+          y
+        );
+
+        y += 3.5;
+
+        pdf.text(
+          `GST ${Number(
+            item.gst_rate ?? 0
+          ).toFixed(2)}%`,
+          left,
+          y
+        );
+
+        pdf.text(
+          money(item.gst_amount),
+          right,
+          y,
+          {
+            align: "right",
+          }
+        );
+
+        y += 4;
+
+        if (
+          index <
+          order.order_items.length - 1
+        ) {
+          drawDottedLine(y);
+
+          y += 5;
+        }
+      }
+    );
+
+    y += 1;
+
+    drawLine(y);
+
+    y += 6;
+
+    // =================================================
+    // TOTALS
+    // =================================================
+
+    printLabelValue(
+      "Subtotal",
+      money(order.subtotal),
+      y
+    );
+
+    y += 5;
+
+    printLabelValue(
+      "GST",
+      money(order.gst_amount),
+      y
+    );
+
+    y += 5;
+
+    pdf.setFillColor(234, 251, 247);
+
+    pdf.roundedRect(
+      left,
+      y,
+      right - left,
+      12,
+      2,
+      2,
+      "F"
+    );
+
+    pdf.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    pdf.setFontSize(8);
+
+    pdf.setTextColor(0, 111, 101);
+
+    pdf.text(
+      "GRAND TOTAL",
+      left + 3,
+      y + 7.5
+    );
+
+    pdf.setFontSize(9.5);
+
+    pdf.text(
+      money(order.total_amount),
+      right - 3,
+      y + 7.5,
+      {
+        align: "right",
+      }
+    );
+
+    y += 17;
+
+    printLabelValue(
+      "Paid amount",
+      money(order.paid_amount),
+      y,
+      true
+    );
+
+    y += 5;
+
+    const balanceAmount =
+      Math.max(
+        0,
+        Number(order.total_amount) -
+          Number(order.paid_amount)
+      );
+
+    printLabelValue(
+      "Balance",
+      money(balanceAmount),
+      y,
+      true
+    );
+
+    y += 6;
+
+    drawLine(y);
+
+    y += 6;
+
+    // =================================================
+    // STATUS SECTION
+    // =================================================
+
+    pdf.setFillColor(248, 250, 251);
+
+    pdf.roundedRect(
+      left,
+      y,
+      right - left,
+      18,
+      2,
+      2,
+      "F"
+    );
+
+    pdf.setFont(
+      "helvetica",
+      "normal"
+    );
+
+    pdf.setFontSize(6.2);
+
+    pdf.setTextColor(
+      102,
+      112,
+      133
+    );
+
+    pdf.text(
+      "PAYMENT STATUS",
+      left + 3,
+      y + 5
+    );
+
+    pdf.text(
+      "ORDER STATUS",
+      left + 3,
+      y + 12.5
+    );
+
+    pdf.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    pdf.setTextColor(
+      29,
+      41,
+      57
+    );
+
+    pdf.text(
+      getPaymentLabel(
+        order.payment_status
+      ).toUpperCase(),
+      right - 3,
+      y + 5,
+      {
+        align: "right",
+      }
+    );
+
+    pdf.text(
+      getOrderStatusLabel(
+        order.status
+      ).toUpperCase(),
+      right - 3,
+      y + 12.5,
+      {
+        align: "right",
+      }
+    );
+
+    y += 23;
+
+    // =================================================
+    // FOOTER
+    // =================================================
+
+    pdf.setFont(
+      "helvetica",
+      "bold"
+    );
+
+    pdf.setFontSize(7.2);
+
+    pdf.setTextColor(16, 24, 40);
+
+    pdf.text(
+      "THANK YOU FOR SHOPPING WITH US",
+      centre,
+      y,
+      {
+        align: "center",
+      }
+    );
+
+    y += 4;
+
+    pdf.setFont(
+      "helvetica",
+      "normal"
+    );
+
+    pdf.setFontSize(5.8);
+
+    pdf.setTextColor(
+      152,
+      162,
+      179
+    );
+
+    pdf.text(
+      "Please keep this invoice for future reference.",
+      centre,
+      y,
+      {
+        align: "center",
+      }
+    );
+
+    y += 4;
+
+    pdf.text(
+      `Invoice generated for ${order.order_id}`,
+      centre,
+      y,
+      {
+        align: "center",
+      }
+    );
+    y += 10;
+
+    pdf.save(
+      `${order.order_id}-bill.pdf`
+    );
+  } catch (billError) {
+    console.error(billError);
+
+    setError(
+      "Unable to generate the bill. Please try again."
+    );
+  }
+}
+
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("ALL");
+    setPaymentFilter("ALL");
+  }
+
+  return (
+    <div className="text-[#101828]">
+      <section className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-[12px] font-semibold text-[#009d8b]">
+            Order management
+          </p>
+
+          <h1 className="mt-1 text-[30px] font-semibold tracking-[-0.04em]">
+            Orders
+          </h1>
+
+          <p className="mt-2 text-[13px] text-[#667085]">
+            Track customer orders, payment and
+            delivery status from one place.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() =>
+            void loadOrders(true)
+          }
+          className="w-fit rounded-xl border border-[#d8e0e4] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#475467] shadow-sm transition hover:border-[#9ddbd4] hover:bg-[#f5fbfa] hover:text-[#008f80]"
+        >
+          Refresh orders
+        </button>
+      </section>
+
+      <OrderSummary
+        total={statistics.total}
+        pending={statistics.pending}
+        transit={statistics.transit}
+        delivered={statistics.delivered}
+      />
+
+      {(error || message) && (
+        <div
+          className={`mb-5 rounded-xl border px-4 py-3 text-[12px] ${error
+              ? "border-red-200 bg-red-50 text-red-700"
+              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+            }`}
+        >
+          {error || message}
+        </div>
+      )}
+
+      <section className="mb-5 rounded-[20px] border border-[#e1e7ea] bg-white p-4 shadow-[0_2px_8px_rgba(16,24,40,0.04)]">
+        <div className="grid gap-3 md:grid-cols-[1fr_190px_190px_auto]">
+          <input
+            type="search"
+            placeholder="Search Order ID, name, phone or item"
+            value={search}
+            onChange={(event) =>
+              setSearch(event.target.value)
+            }
+            className={controlClass}
+          />
+
+          <select
+            value={statusFilter}
+            onChange={(event) =>
+              setStatusFilter(
+                event.target.value
+              )
+            }
+            className={controlClass}
+          >
+            <option value="ALL">
+              All order statuses
+            </option>
+
+            {ORDER_STATUSES.map(
+              (option) => (
+                <option
+                  key={option.value}
+                  value={option.value}
+                >
+                  {option.label}
+                </option>
+              )
+            )}
+          </select>
+
+          <select
+            value={paymentFilter}
+            onChange={(event) =>
+              setPaymentFilter(
+                event.target.value
+              )
+            }
+            className={controlClass}
+          >
+            <option value="ALL">
+              All payment statuses
+            </option>
+
+            {PAYMENT_STATUSES.map(
+              (option) => (
+                <option
+                  key={option.value}
+                  value={option.value}
+                >
+                  {option.label}
+                </option>
+              )
+            )}
+          </select>
+
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="rounded-xl border border-[#d8e0e4] bg-white px-4 py-3 text-[12px] font-semibold text-[#475467] transition hover:bg-[#f8faf9]"
+          >
+            Clear
+          </button>
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-[22px] border border-[#e1e7ea] bg-white shadow-[0_2px_8px_rgba(16,24,40,0.04)]">
+        <div className="flex items-center justify-between border-b border-[#edf1f2] px-5 py-4">
+          <p className="text-[12px] text-[#667085]">
+            Showing {filteredOrders.length} of{" "}
+            {orders.length} orders
+          </p>
+
+          <div className="hidden items-center gap-2 text-[10px] font-semibold text-[#009d8b] sm:flex">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[#00a999]" />
+
+            Live orders
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="py-20 text-center text-[13px] text-[#667085]">
+            Loading orders...
+          </div>
+        ) : filteredOrders.length === 0 ? (
+          <div className="py-20 text-center">
+            <p className="text-[15px] font-semibold text-[#344054]">
+              No orders found
+            </p>
+
+            <p className="mt-1 text-[12px] text-[#98a2b3]">
+              New customer orders will appear here
+              automatically.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1080px] border-collapse">
+              <thead>
+                <tr className="border-b border-[#edf1f2] bg-[#fbfcfc] text-left">
+                  <TableHeading label="Order" />
+
+                  <TableHeading label="Customer" />
+
+                  <TableHeading label="Items" />
+
+                  <TableHeading label="Amount" />
+
+                  <TableHeading label="Payment" />
+
+                  <TableHeading label="Status" />
+
+                  <TableHeading label="Date" />
+
+                  <TableHeading label="Bill" />
+                </tr>
+              </thead>
+
+              <tbody>
+                {filteredOrders.map(
+                  (order) => (
+                    <OrderRow
+                      key={order.order_id}
+                      order={order}
+                      updating={
+                        updatingOrderId ===
+                        order.order_id
+                      }
+                      onStatusChange={
+                        updateOrderStatus
+                      }
+                      onPaymentChange={
+                        updatePaymentStatus
+                      }
+                      onDownloadBill={
+                        downloadBill
+                      }
+                    />
+                  )
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function OrderSummary({
+  total,
+  pending,
+  transit,
+  delivered,
+}: {
+  total: number;
+  pending: number;
+  transit: number;
+  delivered: number;
+}) {
+  const cards = [
+    {
+      label: "Total orders",
+      value: total,
+      colour:
+        "bg-[#edf4ff] text-[#2563eb]",
+    },
+    {
+      label: "Pending",
+      value: pending,
+      colour:
+        "bg-[#fff4e8] text-[#f97316]",
+    },
+    {
+      label: "In transit",
+      value: transit,
+      colour:
+        "bg-[#f0f9ff] text-[#0284c7]",
+    },
+    {
+      label: "Delivered",
+      value: delivered,
+      colour:
+        "bg-[#eafbf7] text-[#009d8b]",
+    },
+  ];
+
+  return (
+    <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {cards.map((card) => (
+        <article
+          key={card.label}
+          className="rounded-[20px] border border-[#e4e9ec] bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.03),0_8px_20px_rgba(16,24,40,0.045)]"
+        >
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-[12px] font-medium text-[#667085]">
+                {card.label}
+              </p>
+
+              <p className="mt-3 text-[28px] font-semibold leading-none tracking-[-0.04em] text-[#101828]">
+                {card.value}
+              </p>
+            </div>
+
+            <div
+              className={`flex h-9 w-9 items-center justify-center rounded-xl text-[12px] font-bold ${card.colour}`}
+            >
+              {card.value}
+            </div>
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function OrderRow({
+  order,
+  updating,
+  onStatusChange,
+  onPaymentChange,
+  onDownloadBill,
+}: {
+  order: Order;
+  updating: boolean;
+  onStatusChange: (
+    order: Order,
+    status: OrderStatus
+  ) => Promise<void>;
+  onPaymentChange: (
+    order: Order,
+    status: PaymentStatus
+  ) => Promise<void>;
+  onDownloadBill: (
+    order: Order
+  ) => Promise<void>;
+}) {
+  const customer =
+    getCustomer(order.users);
+
+  return (
+    <tr className="border-b border-[#f0f2f3] align-top transition duration-200 last:border-0 hover:bg-[#fafdfd]">
+      <td className="px-5 py-5">
+        <p className="inline-flex rounded-full bg-[#eef8ff] px-3 py-1 text-[11px] font-semibold tracking-wide text-[#2563eb]">
+          {order.order_id}
+        </p>
+      </td>
+
+      <td className="max-w-[210px] px-5 py-5">
+        <p className="truncate text-[13px] font-semibold text-[#344054]">
+          {customer.name}
+        </p>
+        <p className="mt-0.5 text-[9px] text-[#98a2b3]">
+          {order.customer_id}
+        </p>
+        <p className="mt-1 text-[10px] text-[#667085]">
+          {customer.phone}
+        </p>
+
+        <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[#98a2b3]">
+          {customer.address}
+        </p>
+      </td>
+
+      <td className="max-w-[270px] px-5 py-5">
+        {order.order_items.length === 0 ? (
+          <p className="text-[11px] text-[#98a2b3]">
+            No items found
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            {order.order_items.map(
+              (item) => (
+                <div
+                  key={item.order_item_id}
+                  className="flex items-start justify-between gap-3"
+                >
+                  <p className="line-clamp-1 text-[11px] text-[#475467]">
+                    {getProductName(item)}
+                  </p>
+
+                  <span className="shrink-0 rounded-full bg-[#f2f4f7] px-2 py-0.5 text-[9px] font-semibold text-[#667085]">
+                    x{item.quantity}
+                  </span>
+                </div>
+              )
+            )}
+          </div>
+        )}
+      </td>
+
+      <td className="px-2 py-4 whitespace-nowrap">
+        <p className="text-[13px] font-semibold text-[#101828]">
+          ₹{formatMoney(order.total_amount)}
+        </p>
+
+        <p className="mt-1 text-[9px] text-[#98a2b3]">
+          GST ₹
+          {formatMoney(order.gst_amount)}
+        </p>
+
+        {Number(order.paid_amount) > 0 && (
+          <p className="mt-1 text-[9px] font-medium text-[#047857]">
+            Paid ₹
+            {formatMoney(
+              order.paid_amount
+            )}
+          </p>
+        )}
+      </td>
+
+      <td className="px-2 py-4 whitespace-nowrap">
+        <select
+          value={order.payment_status}
+          disabled={updating}
+          onChange={(event) =>
+            void onPaymentChange(
+              order,
+              event.target
+                .value as PaymentStatus
+            )
+          }
+          className={`${miniControlClass} appearance-none ${getPaymentClasses(
+            order.payment_status
+          )}`}
+        >
+          {PAYMENT_STATUSES.map(
+            (option) => (
+              <option
+                key={option.value}
+                value={option.value}
+              >
+                {option.label}
+              </option>
+            )
+          )}
+        </select>
+      </td>
+
+      <td className="px-2 py-4 whitespace-nowrap">
+        <select
+          value={order.status}
+          disabled={updating}
+          onChange={(event) =>
+            void onStatusChange(
+              order,
+              event.target
+                .value as OrderStatus
+            )
+          }
+          className={`${miniControlClass} appearance-none ${getOrderStatusClasses(
+            order.status
+          )}`}
+        >
+          {ORDER_STATUSES.map(
+            (option) => (
+              <option
+                key={option.value}
+                value={option.value}
+              >
+                {option.label}
+              </option>
+            )
+          )}
+        </select>
+      </td>
+
+      <td className="px-2 py-4 whitespace-nowrap">
+        <p className="whitespace-nowrap text-[10px] leading-4 text-[#667085]">
+          {formatDate(order.created_at)}
+        </p>
+      </td>
+
+      <td className="px-2 py-4 whitespace-nowrap">
+        <button
+          type="button"
+          title="Download Bill"
+          onClick={() =>
+            void onDownloadBill(order)
+          }
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#dce7ea] bg-white text-[#667085] shadow-sm transition hover:border-[#81cdc5] hover:text-[#009d8b] hover:shadow-md"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 3v12m0 0l4-4m-4 4l-4-4M4 19h16"
+            />
+          </svg>
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function TableHeading({
+  label,
+}: {
+  label: string;
+}) {
+  return (
+    <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-[0.12em] text-[#98a2b3]">
+      {label}
+    </th>
+  );
+}
+
+function getCustomer(
+  users: CustomerDetails
+) {
+  const customer = Array.isArray(users)
+    ? users[0]
+    : users;
+
+  return {
+    name: customer?.name ?? "Customer",
+    phone: customer?.phone ?? "-",
+    address:
+      customer?.address ?? "Not available",
+  };
+}
+
+function getProductName(
+  item: OrderItem
+) {
+  if (item.product_name_snapshot) {
+    return item.product_name_snapshot;
+  }
+
+  const product = Array.isArray(
+    item.products
+  )
+    ? item.products[0]
+    : item.products;
+
+  return (
+    product?.product_name ?? "Product"
+  );
+}
+
+function formatMoney(
+  value: number | string | null
+) {
+  return Number(value ?? 0).toLocaleString(
+    "en-IN",
+    {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }
+  );
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Not available";
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-IN",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  ).format(date);
+}
+
+function getOrderStatusLabel(
+  value: OrderStatus
+) {
+  return (
+    ORDER_STATUSES.find(
+      (item) => item.value === value
+    )?.label ?? value
+  );
+}
+
+function getPaymentLabel(
+  value: PaymentStatus
+) {
+  return (
+    PAYMENT_STATUSES.find(
+      (item) => item.value === value
+    )?.label ?? value
+  );
+}
+
+function getOrderStatusClasses(
+  value: OrderStatus
+) {
+  if (value === "DELIVERED") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (value === "CANCELLED") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  if (value === "IN_TRANSIT") {
+    return "border-blue-200 bg-blue-50 text-blue-700";
+  }
+
+  if (value === "PACKED") {
+    return "border-purple-200 bg-purple-50 text-purple-700";
+  }
+
+  return "border-amber-200 bg-amber-50 text-amber-700";
+}
+
+function getPaymentClasses(
+  value: PaymentStatus
+) {
+  if (value === "PAID") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (
+    value === "PARTIALLY_PAID"
+  ) {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  return "border-red-200 bg-red-50 text-red-700";
+}
+
+function drawReceiptLine(
+  pdf: {
+    setDrawColor: (
+      red: number,
+      green: number,
+      blue: number
+    ) => void;
+    line: (
+      x1: number,
+      y1: number,
+      x2: number,
+      y2: number
+    ) => void;
+  },
+  y: number
+) {
+  pdf.setDrawColor(190, 200, 205);
+  pdf.line(5, y, 75, y);
+}
+
+const controlClass =
+  "w-full rounded-xl border border-[#dfe5e8] bg-[#fbfcfc] px-4 py-3 text-[12px] text-[#101828] outline-none focus:border-[#81cdc5] focus:bg-white focus:ring-4 focus:ring-[#e6f6f3]";
+
+const miniControlClass =
+  "h-7 min-w-[85px] rounded-md border px-2 text-[8.5px] font-medium shadow-sm outline-none transition bg-white hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50";

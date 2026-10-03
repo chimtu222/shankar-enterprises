@@ -9,6 +9,7 @@ type Product = {
   category: string;
   product_name: string;
   price: number;
+  gst_rate: number;
   available_quantity: number;
   image_url: string | null;
   is_visible: boolean;
@@ -295,9 +296,7 @@ function CustomerHeader({
     <header className="sticky top-0 z-40 border-b border-[#e7ecef] bg-white/95 shadow-[0_1px_4px_rgba(16,24,40,0.04)] backdrop-blur-xl">
       <div className="mx-auto flex h-[72px] max-w-[1240px] items-center gap-5 px-4 sm:px-6 lg:px-8">
         <Link href="/products" className="flex shrink-0 items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#2a94f4] to-[#1756bd] text-lg font-bold text-white shadow-sm">
-            S
-          </div>
+          <img src="/SE_logo.png" alt="Logo" className="w-10 h-10" />
 
           <span className="hidden text-[15px] font-semibold text-[#101828] sm:block">
             Sankar Enterprises

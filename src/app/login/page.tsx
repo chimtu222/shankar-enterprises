@@ -46,13 +46,11 @@ export default function LoginPage() {
       <div className="w-full max-w-md bg-white rounded-3xl shadow-xl p-8">
 
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 rounded-full bg-teal-600 text-white flex items-center justify-center text-2xl font-bold">
-            S
-          </div>
+          <img src="/SE_logo.png" alt="Logo" className="w-16 h-16" />
 
-          <h2 className="mt-4 text-sm tracking-[4px] font-semibold text-teal-600 uppercase">
+          <h1 className="mt-4 text-sm tracking-[4px] font-semibold text-teal-600 uppercase">
             Sankar Enterprises
-          </h2>
+          </h1>
 
           <h1 className="mt-4 text-4xl font-semibold text-gray-900">
             Sign In
