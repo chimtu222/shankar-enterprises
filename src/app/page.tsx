@@ -1,9 +1,5 @@
-export default function Home() {
-  return (
-    <main className="min-h-screen flex items-center justify-center">
-      <h1 className="text-4xl font-bold">
-        Sankar Enterprises
-      </h1>
-    </main>
-  );
+import { redirect } from "next/navigation";
+
+export default function HomePage() {
+  redirect("/login");
 }
