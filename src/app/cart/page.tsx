@@ -293,7 +293,7 @@ export default function CartPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f3f7f9] text-[#101828]">
+    <main className="h-screen min-h-screen overflow-y-auto bg-[#f3f7f9] text-[#101828]">
       <header className="border-b border-[#e7ecef] bg-white">
         <div className="mx-auto flex h-[70px] max-w-[1100px] items-center justify-between px-4 sm:px-6">
           <Link

@@ -198,7 +198,7 @@ export default function CustomerOrdersPage() {
   }, [orders]);
 
   return (
-    <main className="min-h-screen bg-[#f3f7f9] text-[#101828]">
+    <main className="h-screen min-h-screen overflow-y-auto bg-[#f3f7f9] text-[#101828]">
       <header className="sticky top-0 z-30 border-b border-[#e7ecef] bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-[70px] max-w-[1100px] items-center justify-between px-4 sm:px-6">
           <Link href="/products" className="flex items-center gap-3">
