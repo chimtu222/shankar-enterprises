@@ -17,6 +17,7 @@ type Product = {
   price: number;
   available_quantity: number;
   image_url: string | null;
+  image_size_bytes?: number | null;
   is_visible: boolean;
   created_at: string;
   updated_at: string;
@@ -42,8 +43,7 @@ export default function AdminProductsPage() {
   const [saving, setSaving] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingProduct, setEditingProduct] =
-    useState<Product | null>(null);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -52,8 +52,7 @@ export default function AdminProductsPage() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [stockFilter, setStockFilter] = useState("ALL");
-  const [visibilityFilter, setVisibilityFilter] =
-    useState("ALL");
+  const [visibilityFilter, setVisibilityFilter] = useState("ALL");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [showFilters, setShowFilters] = useState(true);
@@ -205,11 +204,11 @@ export default function AdminProductsPage() {
 
     if (!file) return;
 
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-    ];
+    console.log("Image Size (Bytes)", file.size);
+    console.log("Image Size (KB)", (file.size / 1024).toFixed(2));
+    console.log("Image Size (MB)", (file.size / (1024 * 1024)).toFixed(2));
+
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp",];
 
     if (!allowedTypes.includes(file.type)) {
       setError("Select a JPG, PNG or WebP image.");
@@ -313,6 +312,7 @@ export default function AdminProductsPage() {
         price,
         available_quantity: quantity,
         image_url: finalImageUrl,
+        image_size_bytes: imageFile ? imageFile.size : editingProduct?.image_size_bytes ?? 0,
       };
 
       if (editingProduct) {
@@ -381,9 +381,9 @@ export default function AdminProductsPage() {
       currentProducts.map((currentProduct) =>
         currentProduct.product_id === product.product_id
           ? {
-              ...currentProduct,
-              is_visible: newVisibility,
-            }
+            ...currentProduct,
+            is_visible: newVisibility,
+          }
           : currentProduct
       )
     );
@@ -466,11 +466,10 @@ export default function AdminProductsPage() {
 
       {(message || error) && (
         <div
-          className={`mb-5 rounded-xl border px-4 py-3 text-[13px] ${
-            error
+          className={`mb-5 rounded-xl border px-4 py-3 text-[13px] ${error
               ? "border-[#fecaca] bg-[#fff1f2] text-[#be123c]"
               : "border-[#a7f3d0] bg-[#ecfdf5] text-[#047857]"
-          }`}
+            }`}
         >
           {error || message}
         </div>
@@ -1193,11 +1192,10 @@ function VisibilityBadge({
 }) {
   return (
     <span
-      className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold ${
-        visible
+      className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-semibold ${visible
           ? "border-[#bae6fd] bg-[#f0f9ff] text-[#0369a1]"
           : "border-[#e4e7ec] bg-[#f8fafc] text-[#667085]"
-      }`}
+        }`}
     >
       {visible ? "Visible" : "Hidden"}
     </span>
@@ -1221,11 +1219,10 @@ function IconButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
-        danger
+      className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${danger
           ? "text-[#f43f5e] hover:bg-[#fff1f2]"
           : "text-[#8293aa] hover:bg-[#f2f6f6] hover:text-[#009d8b]"
-      }`}
+        }`}
     >
       {children}
     </button>

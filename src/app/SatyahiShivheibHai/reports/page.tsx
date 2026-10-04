@@ -12,8 +12,7 @@ import { supabase } from "@/lib/supabase";
 type OrderStatus =
   | "PENDING"
   | "IN_PROCESS"
-  | "PACKED"
-  | "IN_TRANSIT"
+  | "PARTIAL"
   | "DELIVERED"
   | "CANCELLED";
 
@@ -1140,10 +1139,7 @@ function OrderStatusBadge({
     IN_PROCESS:
       "border-amber-200 bg-amber-50 text-amber-700",
 
-    PACKED:
-      "border-purple-200 bg-purple-50 text-purple-700",
-
-    IN_TRANSIT:
+    PARTIAL:
       "border-blue-200 bg-blue-50 text-blue-700",
 
     DELIVERED:
@@ -1232,9 +1228,7 @@ function getOrderStatusLabel(
 
     IN_PROCESS: "In process",
 
-    PACKED: "Packed",
-
-    IN_TRANSIT: "In transit",
+    PARTIAL: "Partial",
 
     DELIVERED: "Delivered",
 

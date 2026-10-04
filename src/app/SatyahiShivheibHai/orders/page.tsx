@@ -13,8 +13,7 @@ import { supabase } from "@/lib/supabase";
 type OrderStatus =
   | "PENDING"
   | "IN_PROCESS"
-  | "PACKED"
-  | "IN_TRANSIT"
+  | "PARTIAL" 
   | "DELIVERED"
   | "CANCELLED";
 
@@ -64,6 +63,7 @@ type Order = {
   status: OrderStatus;
   payment_status: PaymentStatus;
   paid_amount: number;
+  admin_note: string | null;
   created_at: string;
   updated_at: string;
   users: CustomerDetails;
@@ -88,12 +88,8 @@ const ORDER_STATUSES: {
       label: "In process",
     },
     {
-      value: "PACKED",
-      label: "Packed",
-    },
-    {
-      value: "IN_TRANSIT",
-      label: "In transit",
+      value: "PARTIAL",
+      label: "Partial",
     },
     {
       value: "DELIVERED",
@@ -128,16 +124,16 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] =
-    useState("ALL");
-  const [paymentFilter, setPaymentFilter] =
-    useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [paymentFilter, setPaymentFilter] = useState("ALL");
 
-  const [updatingOrderId, setUpdatingOrderId] =
-    useState<string | null>(null);
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [noteOrder, setNoteOrder] = useState<Order | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
   const [
     newOrderNotification,
     setNewOrderNotification,
@@ -164,6 +160,7 @@ export default function AdminOrdersPage() {
             status,
             payment_status,
             paid_amount,
+            admin_note,
             created_at,
             updated_at,
             users!orders_customer_fk (
@@ -463,7 +460,7 @@ export default function AdminOrdersPage() {
 
       transit: orders.filter(
         (order) =>
-          order.status === "IN_TRANSIT"
+          order.status === "PARTIAL"
       ).length,
 
       delivered: orders.filter(
@@ -474,33 +471,70 @@ export default function AdminOrdersPage() {
   }, [orders]);
 
   async function updateOrderStatus(
-    order: Order,
-    newStatus: OrderStatus
-  ) {
-    setUpdatingOrderId(order.order_id);
-    setError("");
-    setMessage("");
+  order: Order,
+  newStatus: OrderStatus
+) {
+  if (order.status === newStatus) {
+    return;
+  }
 
+  setUpdatingOrderId(order.order_id);
+  setError("");
+  setMessage("");
+
+  try {
     const { error: updateError } =
-      await supabase
-        .from("orders")
-        .update({
-          status: newStatus,
-        })
-        .eq("order_id", order.order_id);
+      await supabase.rpc(
+        "change_order_status",
+        {
+          p_order_id: order.order_id,
+          p_new_status: newStatus,
+        }
+      );
 
     if (updateError) {
-      setError(updateError.message);
+      throw updateError;
+    }
+
+    if (
+      order.status !== "CANCELLED" &&
+      newStatus === "CANCELLED"
+    ) {
+      setMessage(
+        `${order.order_id} cancelled. Ordered quantities were returned to stock.`
+      );
+    } else if (
+      order.status === "CANCELLED" &&
+      newStatus !== "CANCELLED"
+    ) {
+      setMessage(
+        `${order.order_id} reactivated. Ordered quantities were deducted from stock again.`
+      );
     } else {
       setMessage(
         `${order.order_id} order status updated.`
       );
-
-      await loadOrders(false);
     }
 
+    await loadOrders(false);
+  } catch (statusError) {
+    console.error(
+      "Unable to update order status:",
+      statusError
+    );
+
+    setError(
+      statusError instanceof Error
+        ? statusError.message
+        : "Unable to update the order status."
+    );
+
+    await loadOrders(false);
+  } finally {
     setUpdatingOrderId(null);
   }
+}
+
 
   async function updatePaymentStatus(
     order: Order,
@@ -579,7 +613,67 @@ export default function AdminOrdersPage() {
 
     setUpdatingOrderId(null);
   }
+  function openOrderNote(order: Order) {
+    setNoteOrder(order);
+    setNoteText(order.admin_note ?? "");
+    setError("");
+    setMessage("");
+  }
 
+  function closeOrderNote() {
+    if (savingNote) {
+      return;
+    }
+
+    setNoteOrder(null);
+    setNoteText("");
+  }
+
+  async function saveOrderNote() {
+    if (!noteOrder) {
+      return;
+    }
+
+    setSavingNote(true);
+    setError("");
+    setMessage("");
+
+    const cleanedNote =
+      noteText.trim();
+
+    const { error: noteError } =
+      await supabase
+        .from("orders")
+        .update({
+          admin_note:
+            cleanedNote === ""
+              ? null
+              : cleanedNote,
+        })
+        .eq(
+          "order_id",
+          noteOrder.order_id
+        );
+
+    if (noteError) {
+      console.error(noteError);
+      setError(noteError.message);
+      setSavingNote(false);
+      return;
+    }
+
+    setMessage(
+      cleanedNote
+        ? `Note saved for ${noteOrder.order_id}.`
+        : `Note removed from ${noteOrder.order_id}.`
+    );
+
+    setNoteOrder(null);
+    setNoteText("");
+    setSavingNote(false);
+
+    await loadOrders(false);
+  }
   async function downloadBill(order: Order) {
     try {
       const { jsPDF } = await import("jspdf");
@@ -1427,6 +1521,121 @@ export default function AdminOrdersPage() {
           </div>
         </div>
       )}
+      {noteOrder && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-[#101828]/40 px-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
+              closeOrderNote();
+            }
+          }}
+        >
+          <section className="w-full max-w-[460px] overflow-hidden rounded-[24px] border border-[#e1e7ea] bg-white shadow-[0_30px_80px_rgba(16,24,40,0.25)]">
+            <div className="flex items-start justify-between border-b border-[#edf1f2] px-6 py-5">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#009d8b]">
+                  Internal order note
+                </p>
+
+                <h2 className="mt-1 text-[20px] font-semibold tracking-[-0.03em] text-[#101828]">
+                  {noteOrder.order_id}
+                </h2>
+
+                <p className="mt-1 text-[11px] text-[#667085]">
+                  Visible only to the Admin.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                aria-label="Close note"
+                onClick={closeOrderNote}
+                disabled={savingNote}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[20px] leading-none text-[#98a2b3] transition hover:bg-[#f2f4f7] hover:text-[#475467] disabled:opacity-50"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-6">
+              <label>
+                <span className="mb-2 block text-[11px] font-semibold text-[#344054]">
+                  Note or reminder
+                </span>
+
+                <textarea
+                  value={noteText}
+                  onChange={(event) =>
+                    setNoteText(
+                      event.target.value
+                    )
+                  }
+                  maxLength={1000}
+                  rows={7}
+                  autoFocus
+                  placeholder="Example: Customer ordered 10 pieces. Delivered 8 pieces; remaining 2 pieces will be delivered later."
+                  className="w-full resize-none rounded-2xl border border-[#dfe5e8] bg-[#fbfcfc] px-4 py-3 text-[13px] leading-6 text-[#101828] outline-none transition placeholder:text-[#98a2b3] focus:border-[#81cdc5] focus:bg-white focus:ring-4 focus:ring-[#e6f6f3]"
+                />
+              </label>
+
+              <div className="mt-2 flex items-center justify-between">
+                <p className="text-[9px] text-[#98a2b3]">
+                  The note stays saved against this order.
+                </p>
+
+                <p className="text-[9px] text-[#98a2b3]">
+                  {noteText.length}/1000
+                </p>
+              </div>
+
+              <div className="mt-6 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  disabled={
+                    savingNote ||
+                    !noteOrder.admin_note
+                  }
+                  onClick={() => {
+                    setNoteText("");
+                  }}
+                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-[10px] font-semibold text-red-600 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Clear note
+                </button>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={closeOrderNote}
+                    disabled={savingNote}
+                    className="rounded-xl border border-[#d8e0e4] bg-white px-4 py-2.5 text-[10px] font-semibold text-[#667085] transition hover:bg-[#f8faf9] disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={savingNote}
+                    onClick={() =>
+                      void saveOrderNote()
+                    }
+                    className="rounded-xl bg-[#101828] px-5 py-2.5 text-[10px] font-semibold text-white transition hover:bg-[#1d2939] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {savingNote
+                      ? "Saving..."
+                      : noteText.trim()
+                        ? "Save note"
+                        : "Remove note"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
       <section className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[12px] font-semibold text-[#009d8b]">
@@ -1592,7 +1801,7 @@ export default function AdminOrdersPage() {
 
                   <TableHeading label="Date" />
 
-                  <TableHeading label="Bill" />
+                  <TableHeading label="Actions" />
                 </tr>
               </thead>
 
@@ -1614,6 +1823,9 @@ export default function AdminOrdersPage() {
                       }
                       onDownloadBill={
                         downloadBill
+                      }
+                      onOpenNote={
+                        openOrderNote
                       }
                     />
                   )
@@ -1652,7 +1864,7 @@ function OrderSummary({
         "bg-[#fff4e8] text-[#f97316]",
     },
     {
-      label: "In transit",
+      label: "Partial",
       value: transit,
       colour:
         "bg-[#f0f9ff] text-[#0284c7]",
@@ -1701,6 +1913,7 @@ function OrderRow({
   onStatusChange,
   onPaymentChange,
   onDownloadBill,
+  onOpenNote,
 }: {
   order: Order;
   updating: boolean;
@@ -1715,6 +1928,9 @@ function OrderRow({
   onDownloadBill: (
     order: Order
   ) => Promise<void>;
+  onOpenNote: (
+    order: Order
+  ) => void;
 }) {
   const customer =
     getCustomer(order.users);
@@ -1853,29 +2069,59 @@ function OrderRow({
       </td>
 
       <td className="px-2 py-4 whitespace-nowrap">
-        <button
-          type="button"
-          title="Download Bill"
-          onClick={() =>
-            void onDownloadBill(order)
-          }
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#dce7ea] bg-white text-[#667085] shadow-sm transition hover:border-[#81cdc5] hover:text-[#009d8b] hover:shadow-md"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-4 w-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
+        <div className="flex flex-col items-center gap-2">
+          <button
+            type="button"
+            title="Download bill"
+            aria-label={`Download bill for ${order.order_id}`}
+            onClick={() =>
+              void onDownloadBill(order)
+            }
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#dce7ea] bg-white text-[#667085] shadow-sm transition hover:border-[#81cdc5] hover:text-[#009d8b] hover:shadow-md"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 3v12m0 0l4-4m-4 4l-4-4M4 19h16"
-            />
-          </svg>
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 3v12m0 0l4-4m-4 4l-4-4M4 19h16"
+              />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            title={
+              order.admin_note
+                ? "View or edit note"
+                : "Add note"
+            }
+            aria-label={
+              order.admin_note
+                ? `Edit note for ${order.order_id}`
+                : `Add note for ${order.order_id}`
+            }
+            onClick={() =>
+              onOpenNote(order)
+            }
+            className={`relative flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm transition hover:shadow-md ${order.admin_note
+                ? "border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400"
+                : "border-[#dce7ea] bg-white text-[#667085] hover:border-[#81cdc5] hover:text-[#009d8b]"
+              }`}
+          >
+            <NoteIcon className="h-4 w-4" />
+
+            {order.admin_note && (
+              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-500" />
+            )}
+          </button>
+        </div>
       </td>
     </tr>
   );
@@ -1960,11 +2206,25 @@ function formatDate(value: string) {
 function getOrderStatusLabel(
   value: OrderStatus
 ) {
-  return (
-    ORDER_STATUSES.find(
-      (item) => item.value === value
-    )?.label ?? value
-  );
+  switch (value) {
+    case "PENDING":
+      return "Pending";
+
+    case "IN_PROCESS":
+      return "In Process";
+
+    case "PARTIAL":
+      return "Partial";
+
+    case "DELIVERED":
+      return "Delivered";
+
+    case "CANCELLED":
+      return "Cancelled";
+
+    default:
+      return value;
+  }
 }
 
 function getPaymentLabel(
@@ -1984,16 +2244,15 @@ function getOrderStatusClasses(
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
   }
 
+  if (value === "IN_PROCESS") {
+    return "border-purple-200 bg-purple-50 text-purple-700";
+  }
   if (value === "CANCELLED") {
     return "border-red-200 bg-red-50 text-red-700";
   }
 
-  if (value === "IN_TRANSIT") {
+  if (value === "PARTIAL") {
     return "border-blue-200 bg-blue-50 text-blue-700";
-  }
-
-  if (value === "PACKED") {
-    return "border-purple-200 bg-purple-50 text-purple-700";
   }
 
   return "border-amber-200 bg-amber-50 text-amber-700";
@@ -2061,6 +2320,27 @@ function NotificationBellIcon({
         stroke="white"
         strokeWidth="1.5"
       />
+    </svg>
+  );
+}
+
+function NoteIcon({
+  className = "",
+}: {
+  className?: string;
+}) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <path d="M5 3h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+
+      <path d="M8 8h8M8 12h6" />
     </svg>
   );
 }

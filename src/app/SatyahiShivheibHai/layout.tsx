@@ -47,10 +47,10 @@ export default function AdminLayout({
     "Admin Dashboard";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f3f8f7] text-[#101828]">
+    <div className="fixed inset-0 flex min-h-0 overflow-clip bg-[#f3f8f7] text-[#101828]">
       {/* Fixed sidebar */}
 
-      <aside className="flex h-screen w-[240px] shrink-0 flex-col border-r border-[#e5ebe9] bg-white">
+      <aside className="flex h-full min-h-0 w-[240px] shrink-0 flex-col overflow-hidden border-r border-[#e5ebe9] bg-white">
         {/* Brand */}
 
         <div className="flex h-[76px] shrink-0 items-center border-b border-[#edf1f0] px-5">
@@ -67,7 +67,7 @@ export default function AdminLayout({
 
         {/* Navigation */}
 
-        <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6">
           <p className="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#98a2b3]">
             Workspace
           </p>
@@ -140,7 +140,7 @@ export default function AdminLayout({
 
       {/* Right section */}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* Fixed header */}
 
         <header className="flex h-[76px] shrink-0 items-center justify-between border-b border-[#edf1f0] bg-white px-6 lg:px-8">
@@ -197,8 +197,8 @@ export default function AdminLayout({
 
         {/* Only this section scrolls */}
 
-        <main className="min-w-0 flex-1 overflow-y-auto bg-[#f3f8f7]">
-          <div className="mx-auto w-full max-w-[1500px] px-5 py-6 sm:px-7 lg:px-8">
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-[#f3f8f7]">
+          <div className="mx-auto min-w-0 w-full max-w-[1500px] px-5 py-6 sm:px-7 lg:px-8">
             {children}
           </div>
         </main>

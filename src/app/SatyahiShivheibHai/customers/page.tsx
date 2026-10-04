@@ -13,13 +13,57 @@ type Customer = {
   user_id: string;
   name: string;
   phone: string;
-  password: string;
   role: "ADMIN" | "CUSTOMER";
   address: string;
   is_active: boolean;
   created_at: string;
 };
+type OrderStatus =
+  | "PENDING"
+  | "IN_PROCESS"
+  | "PARTIAL"
+  | "DELIVERED"
+  | "CANCELLED";
 
+type PaymentStatus =
+  | "NOT_PAID"
+  | "PARTIALLY_PAID"
+  | "PAID";
+
+type CustomerOrderItem = {
+  order_item_id: string;
+  product_id: string;
+  product_name_snapshot: string | null;
+  quantity: number;
+  price_at_order: number;
+  gst_rate: number;
+  gst_amount: number;
+  line_total: number;
+
+  products:
+    | {
+        product_name: string;
+      }
+    | {
+        product_name: string;
+      }[]
+    | null;
+};
+
+type CustomerOrder = {
+  order_id: string;
+  customer_id: string;
+  subtotal: number;
+  gst_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  payment_status: PaymentStatus;
+  status: OrderStatus;
+  admin_note: string | null;
+  created_at: string;
+  updated_at: string;
+  order_items: CustomerOrderItem[];
+};
 type CustomerStatus = "ALL" | "ACTIVE" | "INACTIVE";
 
 type IconProps = {
@@ -102,13 +146,17 @@ export default function AdminCustomersPage() {
   );
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] =
-    useState<CustomerStatus>("ALL");
+  const [statusFilter, setStatusFilter] =useState<CustomerStatus>("ALL");
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const fetchCustomers = useCallback(
+  const [historyCustomer, setHistoryCustomer,] = useState<Customer | null>(null);
+  const [customerOrders, setCustomerOrders,] = useState<CustomerOrder[]>([]);
+  const [historyLoading, setHistoryLoading,] = useState(false);
+  const [historyError, setHistoryError,] = useState("");
+
+const fetchCustomers = useCallback(
     async (showLoader = false) => {
       if (showLoader) {
         setLoading(true);
@@ -117,7 +165,7 @@ export default function AdminCustomersPage() {
       const { data, error: fetchError } = await supabase
         .from("users")
         .select(
-          "user_id, name, phone, password, role, address, is_active, created_at"
+          "user_id, name, phone, role, address, is_active, created_at"
         )
         .eq("role", "CUSTOMER")
         .order("created_at", {
@@ -139,6 +187,82 @@ export default function AdminCustomersPage() {
     []
   );
 
+  async function openOrderHistory(
+  customer: Customer
+) {
+  setHistoryCustomer(customer);
+  setCustomerOrders([]);
+  setHistoryError("");
+  setHistoryLoading(true);
+
+  try {
+    const { data, error: orderError } =
+      await supabase
+        .from("orders")
+        .select(`
+          order_id,
+          customer_id,
+          subtotal,
+          gst_amount,
+          total_amount,
+          paid_amount,
+          payment_status,
+          status,
+          admin_note,
+          created_at,
+          updated_at,
+          order_items (
+            order_item_id,
+            product_id,
+            product_name_snapshot,
+            quantity,
+            price_at_order,
+            gst_rate,
+            gst_amount,
+            line_total,
+            products (
+              product_name
+            )
+          )
+        `)
+        .eq(
+          "customer_id",
+          customer.user_id
+        )
+        .order("created_at", {
+          ascending: false,
+        });
+
+    if (orderError) {
+      throw orderError;
+    }
+
+    setCustomerOrders(
+      (data ?? []) as unknown as CustomerOrder[]
+    );
+  } catch (historyLoadError) {
+    console.error(
+      "Unable to load customer order history:",
+      historyLoadError
+    );
+
+    setHistoryError(
+      historyLoadError instanceof Error
+        ? historyLoadError.message
+        : "Unable to load customer order history."
+    );
+
+    setCustomerOrders([]);
+  } finally {
+    setHistoryLoading(false);
+  }
+}
+
+function closeOrderHistory() {
+  setHistoryCustomer(null);
+  setCustomerOrders([]);
+  setHistoryError("");
+}
   useEffect(() => {
     void fetchCustomers(true);
 
@@ -262,6 +386,101 @@ export default function AdminCustomersPage() {
 
   return (
     <div className="text-[#101828]">
+      {historyCustomer && (
+  <div
+    className="fixed inset-0 z-[120] flex items-center justify-center bg-[#101828]/45 px-4 py-6 backdrop-blur-sm"
+    onMouseDown={(event) => {
+      if (
+        event.target ===
+        event.currentTarget
+      ) {
+        closeOrderHistory();
+      }
+    }}
+  >
+    <section className="flex max-h-[90vh] w-full max-w-[980px] flex-col overflow-hidden rounded-[26px] border border-[#e1e7ea] bg-white shadow-[0_30px_90px_rgba(16,24,40,0.28)]">
+      <div className="flex shrink-0 items-start justify-between border-b border-[#edf1f2] px-6 py-5 sm:px-7">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#009d8b]">
+            Customer order history
+          </p>
+
+          <h2 className="mt-1 text-[22px] font-semibold tracking-[-0.035em] text-[#101828]">
+            {historyCustomer.name}
+          </h2>
+
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#667085]">
+            <span>
+              ID: {historyCustomer.user_id}
+            </span>
+
+            <span>
+              Phone: {historyCustomer.phone}
+            </span>
+
+            <span>
+              {historyCustomer.address}
+            </span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          aria-label="Close order history"
+          onClick={closeOrderHistory}
+          className="flex h-9 w-9 items-center justify-center rounded-xl text-[22px] leading-none text-[#98a2b3] transition hover:bg-[#f2f4f7] hover:text-[#475467]"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto bg-[#f8faf9] p-5 sm:p-7">
+        {historyError && (
+          <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-700">
+            {historyError}
+          </div>
+        )}
+
+        {historyLoading ? (
+          <div className="py-20 text-center">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#cfe9e5] border-t-[#009d8b]" />
+
+            <p className="mt-4 text-[12px] text-[#667085]">
+              Loading order history...
+            </p>
+          </div>
+        ) : customerOrders.length === 0 ? (
+          <div className="rounded-[22px] border border-dashed border-[#d7e1e0] bg-white px-6 py-20 text-center">
+            <HistoryIcon className="mx-auto h-8 w-8 text-[#98a2b3]" />
+
+            <h3 className="mt-4 text-[16px] font-semibold text-[#344054]">
+              No orders found
+            </h3>
+
+            <p className="mt-1 text-[11px] text-[#98a2b3]">
+              This customer has not placed any orders.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            <CustomerHistorySummary
+              orders={customerOrders}
+            />
+
+            {customerOrders.map(
+              (order) => (
+                <CustomerOrderCard
+                  key={order.order_id}
+                  order={order}
+                />
+              )
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  </div>
+)}
       <section className="mb-6 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[12px] font-semibold tracking-wide text-[#009d8b]">
@@ -393,8 +612,15 @@ export default function AdminCustomersPage() {
             <CustomerCard
               key={customer.user_id}
               customer={customer}
-              updating={updatingId === customer.user_id}
-              onToggleStatus={toggleCustomerStatus}
+              updating={
+                updatingId === customer.user_id
+              }
+              onToggleStatus={
+                toggleCustomerStatus
+              }
+              onOpenHistory={
+                openOrderHistory
+              }
             />
           ))}
         </section>
@@ -402,7 +628,386 @@ export default function AdminCustomersPage() {
     </div>
   );
 }
+function CustomerHistorySummary({
+  orders,
+}: {
+  orders: CustomerOrder[];
+}) {
+  const totals = orders.reduce(
+    (result, order) => {
+      result.orderValue += Number(
+        order.total_amount ?? 0
+      );
 
+      result.paid += Number(
+        order.paid_amount ?? 0
+      );
+
+      result.quantity +=
+        order.order_items.reduce(
+          (quantity, item) =>
+            quantity +
+            Number(item.quantity ?? 0),
+          0
+        );
+
+      return result;
+    },
+    {
+      orderValue: 0,
+      paid: 0,
+      quantity: 0,
+    }
+  );
+
+  const outstanding = Math.max(
+    0,
+    totals.orderValue - totals.paid
+  );
+
+  return (
+    <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <HistoryMetric
+        label="Total orders"
+        value={String(orders.length)}
+      />
+
+      <HistoryMetric
+        label="Total quantity"
+        value={String(totals.quantity)}
+      />
+
+      <HistoryMetric
+        label="Order value"
+        value={formatOrderMoney(
+          totals.orderValue
+        )}
+      />
+
+      <HistoryMetric
+        label="Outstanding"
+        value={formatOrderMoney(
+          outstanding
+        )}
+      />
+    </section>
+  );
+}
+
+function HistoryMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <article className="rounded-[18px] border border-[#e4e9ec] bg-white px-4 py-4 shadow-sm">
+      <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[#98a2b3]">
+        {label}
+      </p>
+
+      <p className="mt-2 text-[17px] font-semibold text-[#101828]">
+        {value}
+      </p>
+    </article>
+  );
+}
+function CustomerOrderCard({
+  order,
+}: {
+  order: CustomerOrder;
+}) {
+  const totalQuantity =
+    order.order_items.reduce(
+      (total, item) =>
+        total + Number(item.quantity),
+      0
+    );
+
+  const balance = Math.max(
+    0,
+    Number(order.total_amount) -
+      Number(order.paid_amount)
+  );
+
+  return (
+    <article className="overflow-hidden rounded-[22px] border border-[#e1e7ea] bg-white shadow-[0_2px_8px_rgba(16,24,40,0.04)]">
+      <div className="flex flex-col gap-4 border-b border-[#edf1f2] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-[#eef8ff] px-3 py-1 text-[10px] font-semibold tracking-wide text-[#2563eb]">
+              {order.order_id}
+            </span>
+
+            <CustomerOrderStatus
+              status={order.status}
+            />
+
+            <CustomerPaymentStatus
+              status={
+                order.payment_status
+              }
+            />
+          </div>
+
+          <p className="mt-2 text-[10px] text-[#98a2b3]">
+            {formatOrderDate(
+              order.created_at
+            )}
+          </p>
+        </div>
+
+        <div className="sm:text-right">
+          <p className="text-[18px] font-semibold text-[#101828]">
+            {formatOrderMoney(
+              order.total_amount
+            )}
+          </p>
+
+          <p className="mt-1 text-[9px] text-[#98a2b3]">
+            {totalQuantity} total quantity
+          </p>
+        </div>
+      </div>
+
+      <div className="p-5">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] border-collapse">
+            <thead>
+              <tr className="border-b border-[#edf1f2] text-left">
+                <OrderHistoryHeading label="Product" />
+                <OrderHistoryHeading label="Qty" />
+                <OrderHistoryHeading label="Unit price" />
+                <OrderHistoryHeading label="GST" />
+                <OrderHistoryHeading label="Total" />
+              </tr>
+            </thead>
+
+            <tbody>
+              {order.order_items.map(
+                (item) => (
+                  <tr
+                    key={
+                      item.order_item_id
+                    }
+                    className="border-b border-[#f2f4f5] last:border-0"
+                  >
+                    <td className="px-3 py-3">
+                      <p className="text-[11px] font-semibold text-[#344054]">
+                        {getHistoryProductName(
+                          item
+                        )}
+                      </p>
+
+                      <p className="mt-1 text-[9px] text-[#98a2b3]">
+                        {item.product_id}
+                      </p>
+                    </td>
+
+                    <td className="px-3 py-3 text-[11px] font-semibold text-[#344054]">
+                      {item.quantity}
+                    </td>
+
+                    <td className="whitespace-nowrap px-3 py-3 text-[11px] text-[#667085]">
+                      {formatOrderMoney(
+                        item.price_at_order
+                      )}
+                    </td>
+
+                    <td className="whitespace-nowrap px-3 py-3">
+                      <p className="text-[11px] text-[#667085]">
+                        {formatOrderMoney(
+                          item.gst_amount
+                        )}
+                      </p>
+
+                      <p className="mt-0.5 text-[8px] text-[#98a2b3]">
+                        {Number(
+                          item.gst_rate
+                        ).toFixed(2)}
+                        %
+                      </p>
+                    </td>
+
+                    <td className="whitespace-nowrap px-3 py-3 text-[11px] font-semibold text-[#101828]">
+                      {formatOrderMoney(
+                        item.line_total
+                      )}
+                    </td>
+                  </tr>
+                )
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <OrderAmountBox
+            label="Subtotal"
+            value={formatOrderMoney(
+              order.subtotal
+            )}
+          />
+
+          <OrderAmountBox
+            label="GST"
+            value={formatOrderMoney(
+              order.gst_amount
+            )}
+          />
+
+          <OrderAmountBox
+            label="Final total"
+            value={formatOrderMoney(
+              order.total_amount
+            )}
+          />
+
+          <OrderAmountBox
+            label="Paid"
+            value={formatOrderMoney(
+              order.paid_amount
+            )}
+          />
+
+          <OrderAmountBox
+            label="Balance"
+            value={formatOrderMoney(
+              balance
+            )}
+          />
+        </div>
+
+        {order.admin_note && (
+          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-amber-700">
+              Admin note
+            </p>
+
+            <p className="mt-2 whitespace-pre-wrap text-[11px] leading-5 text-amber-900">
+              {order.admin_note}
+            </p>
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+function OrderHistoryHeading({
+  label,
+}: {
+  label: string;
+}) {
+  return (
+    <th className="px-3 py-3 text-[8px] font-bold uppercase tracking-[0.1em] text-[#98a2b3]">
+      {label}
+    </th>
+  );
+}
+
+function OrderAmountBox({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl bg-[#f7f9fa] px-3 py-3">
+      <p className="text-[8px] font-semibold uppercase tracking-[0.08em] text-[#98a2b3]">
+        {label}
+      </p>
+
+      <p className="mt-1 text-[11px] font-semibold text-[#344054]">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function CustomerOrderStatus({
+  status,
+}: {
+  status: OrderStatus;
+}) {
+  const labels: Record<
+    OrderStatus,
+    string
+  > = {
+    PENDING: "Pending",
+    IN_PROCESS: "In Process",
+    PARTIAL: "Partial",
+    DELIVERED: "Delivered",
+    CANCELLED: "Cancelled",
+  };
+
+  const colours: Record<
+    OrderStatus,
+    string
+  > = {
+    PENDING:
+      "border-amber-200 bg-amber-50 text-amber-700",
+
+    IN_PROCESS:
+      "border-purple-200 bg-purple-50 text-purple-700",
+
+    PARTIAL:
+      "border-blue-200 bg-blue-50 text-blue-700",
+
+    DELIVERED:
+      "border-emerald-200 bg-emerald-50 text-emerald-700",
+
+    CANCELLED:
+      "border-red-200 bg-red-50 text-red-700",
+  };
+
+  return (
+    <span
+      className={`rounded-full border px-2.5 py-1 text-[8px] font-semibold ${colours[status]}`}
+    >
+      {labels[status]}
+    </span>
+  );
+}
+
+function CustomerPaymentStatus({
+  status,
+}: {
+  status: PaymentStatus;
+}) {
+  const labels: Record<
+    PaymentStatus,
+    string
+  > = {
+    NOT_PAID: "Not paid",
+    PARTIALLY_PAID:
+      "Partially paid",
+    PAID: "Paid",
+  };
+
+  const colours: Record<
+    PaymentStatus,
+    string
+  > = {
+    NOT_PAID:
+      "border-red-200 bg-red-50 text-red-700",
+
+    PARTIALLY_PAID:
+      "border-orange-200 bg-orange-50 text-orange-700",
+
+    PAID:
+      "border-emerald-200 bg-emerald-50 text-emerald-700",
+  };
+
+  return (
+    <span
+      className={`rounded-full border px-2.5 py-1 text-[8px] font-semibold ${colours[status]}`}
+    >
+      {labels[status]}
+    </span>
+  );
+}
 function CustomerSkeleton() {
   return (
     <section
@@ -501,10 +1106,18 @@ function CustomerCard({
   customer,
   updating,
   onToggleStatus,
+  onOpenHistory,
 }: {
   customer: Customer;
   updating: boolean;
-  onToggleStatus: (customer: Customer) => void;
+
+  onToggleStatus: (
+    customer: Customer
+  ) => void;
+
+  onOpenHistory: (
+    customer: Customer
+  ) => void;
 }) {
   return (
     <article className="rounded-[24px] border border-[#e1e7ea] bg-white p-5 shadow-[0_2px_8px_rgba(16,24,40,0.04)]">
@@ -550,27 +1163,120 @@ function CustomerCard({
       </div>
 
       <div className="mt-5 flex items-center justify-between gap-3 border-t border-[#edf2f3] pt-4">
-        <button
-          type="button"
-          onClick={() => onToggleStatus(customer)}
-          disabled={updating}
-          className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[11px] font-semibold transition ${
-            customer.is_active
-              ? "bg-[#fff3f2] text-[#c4320a] hover:bg-[#ffefe9]"
-              : "bg-[#ebfbf7] text-[#009d8b] hover:bg-[#dffaf4]"
-          } ${updating ? "cursor-not-allowed opacity-70" : ""}`}
-        >
-          {updating ? "Updating..." : customer.is_active ? "Deactivate" : "Activate"}
-        </button>
+  <div className="flex flex-wrap items-center gap-2">
+    <button
+      type="button"
+      onClick={() =>
+        onToggleStatus(customer)
+      }
+      disabled={updating}
+      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[11px] font-semibold transition ${
+        customer.is_active
+          ? "bg-[#fff3f2] text-[#c4320a] hover:bg-[#ffefe9]"
+          : "bg-[#ebfbf7] text-[#009d8b] hover:bg-[#dffaf4]"
+      } ${
+        updating
+          ? "cursor-not-allowed opacity-70"
+          : ""
+      }`}
+    >
+      {updating
+        ? "Updating..."
+        : customer.is_active
+          ? "Deactivate"
+          : "Activate"}
+    </button>
 
-        <div className="text-[11px] text-[#98a2b3]">
-          {customer.role}
-        </div>
-      </div>
+    <button
+      type="button"
+      onClick={() =>
+        onOpenHistory(customer)
+      }
+      className="inline-flex items-center gap-2 rounded-xl border border-[#cfe2df] bg-[#f5fbfa] px-3 py-2 text-[11px] font-semibold text-[#008f80] transition hover:border-[#81cdc5] hover:bg-[#eaf8f5]"
+    >
+      <HistoryIcon className="h-4 w-4" />
+
+      Order history
+    </button>
+  </div>
+
+  <div className="hidden text-[10px] text-[#98a2b3] xl:block">
+    {customer.role}
+  </div>
+</div>
     </article>
   );
 }
+function getHistoryProductName(
+  item: CustomerOrderItem
+) {
+  if (item.product_name_snapshot) {
+    return item.product_name_snapshot;
+  }
 
+  const product = Array.isArray(
+    item.products
+  )
+    ? item.products[0]
+    : item.products;
+
+  return (
+    product?.product_name ?? "Product"
+  );
+}
+
+function formatOrderMoney(
+  value: number | string | null
+) {
+  return `₹${Number(
+    value ?? 0
+  ).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatOrderDate(
+  value: string
+) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Not available";
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-IN",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  ).format(date);
+}
+
+function HistoryIcon({
+  className = "",
+}: IconProps) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+    >
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+
+      <path d="M3 4v6h6" />
+
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
 function PhoneIcon({ className = "" }: IconProps) {
   return (
     <svg
