@@ -1031,10 +1031,10 @@ export default function AdminPage() {
 
         <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <QuickAction
-            title="Products"
-            description="Manage catalog"
-            href="/SatyahiShivheibHai/products"
-            icon={PackageIcon}
+            title="Add Customer"
+            description="Add new Customer"
+            href="/SatyahiShivheibHai/customers"
+            icon={PlusIcon}
           />
 
           <QuickAction

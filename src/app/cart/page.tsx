@@ -22,7 +22,30 @@ type LoggedInUser = {
   phone: string;
   role: string;
 };
+function getCustomerCartKey() {
+  const savedUser =
+    localStorage.getItem("user");
 
+  if (!savedUser) {
+    return null;
+  }
+
+  try {
+    const customer =
+      JSON.parse(savedUser) as LoggedInUser;
+
+    if (
+      customer.role !== "CUSTOMER" ||
+      !customer.user_id
+    ) {
+      return null;
+    }
+
+    return `customer_cart_${customer.user_id}`;
+  } catch {
+    return null;
+  }
+}
 export default function CartPage() {
   const router = useRouter();
 
@@ -33,27 +56,66 @@ export default function CartPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    loadCart();
-  }, []);
+  const savedUser =
+    localStorage.getItem("user");
 
-  function loadCart() {
-    const savedCart =
-      localStorage.getItem("customer_cart");
+  if (!savedUser) {
+    router.replace("/login");
+    return;
+  }
 
-    if (!savedCart) {
+  try {
+    const customer =
+      JSON.parse(savedUser) as LoggedInUser;
+
+    if (
+      customer.role !== "CUSTOMER" ||
+      !customer.user_id
+    ) {
+      localStorage.removeItem("user");
+      router.replace("/login");
       return;
     }
 
-    try {
-      const parsedCart =
-        JSON.parse(savedCart) as CartItem[];
-
-      setCartItems(parsedCart);
-    } catch {
-      localStorage.removeItem("customer_cart");
-      setCartItems([]);
-    }
+    loadCart();
+  } catch {
+    localStorage.removeItem("user");
+    router.replace("/login");
   }
+}, [router]);
+
+  function loadCart() {
+  const cartKey = getCustomerCartKey();
+
+  if (!cartKey) {
+    setCartItems([]);
+    return;
+  }
+
+  const savedCart =
+    localStorage.getItem(cartKey);
+
+  if (!savedCart) {
+    setCartItems([]);
+    return;
+  }
+
+  try {
+    const parsedCart =
+      JSON.parse(savedCart) as CartItem[];
+
+    if (!Array.isArray(parsedCart)) {
+      throw new Error(
+        "Invalid cart information."
+      );
+    }
+
+    setCartItems(parsedCart);
+  } catch {
+    localStorage.removeItem(cartKey);
+    setCartItems([]);
+  }
+}
 
   const calculatedItems = useMemo(() => {
     return cartItems.map((item) => {
@@ -108,13 +170,29 @@ export default function CartPage() {
   }, [subtotal, totalGst]);
 
   function saveCart(updatedCart: CartItem[]) {
-    setCartItems(updatedCart);
+  const cartKey = getCustomerCartKey();
 
-    localStorage.setItem(
-      "customer_cart",
-      JSON.stringify(updatedCart)
+  if (!cartKey) {
+    setError(
+      "Your login session is invalid. Please log in again."
     );
+
+    router.push("/login");
+    return;
   }
+
+  setCartItems(updatedCart);
+
+  if (updatedCart.length === 0) {
+    localStorage.removeItem(cartKey);
+    return;
+  }
+
+  localStorage.setItem(
+    cartKey,
+    JSON.stringify(updatedCart)
+  );
+}
 
   function increaseQuantity(item: CartItem) {
     if (
@@ -249,7 +327,11 @@ export default function CartPage() {
     setGeneratedOrderId(finalOrderId);
     setCartItems([]);
 
-    localStorage.removeItem("customer_cart");
+    const cartKey = getCustomerCartKey();
+
+    if (cartKey) {
+      localStorage.removeItem(cartKey);
+}
   }
 
   if (generatedOrderId) {

@@ -13,7 +13,7 @@ import { supabase } from "@/lib/supabase";
 type OrderStatus =
   | "PENDING"
   | "IN_PROCESS"
-  | "PARTIAL" 
+  | "PARTIAL"
   | "DELIVERED"
   | "CANCELLED";
 
@@ -134,10 +134,11 @@ export default function AdminOrdersPage() {
   const [noteOrder, setNoteOrder] = useState<Order | null>(null);
   const [noteText, setNoteText] = useState("");
   const [savingNote, setSavingNote] = useState(false);
-  const [
-    newOrderNotification,
-    setNewOrderNotification,
-  ] = useState<NewOrderNotification | null>(null);
+  const [deleteOrder, setDeleteOrder] = useState<Order | null>(null);
+  const [deletingOrder, setDeletingOrder] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState(false);
+
+  const [newOrderNotification, setNewOrderNotification,] = useState<NewOrderNotification | null>(null);
 
   const notificationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notifiedOrderIdsRef = useRef<Set<string>>(new Set());
@@ -471,69 +472,69 @@ export default function AdminOrdersPage() {
   }, [orders]);
 
   async function updateOrderStatus(
-  order: Order,
-  newStatus: OrderStatus
-) {
-  if (order.status === newStatus) {
-    return;
-  }
-
-  setUpdatingOrderId(order.order_id);
-  setError("");
-  setMessage("");
-
-  try {
-    const { error: updateError } =
-      await supabase.rpc(
-        "change_order_status",
-        {
-          p_order_id: order.order_id,
-          p_new_status: newStatus,
-        }
-      );
-
-    if (updateError) {
-      throw updateError;
+    order: Order,
+    newStatus: OrderStatus
+  ) {
+    if (order.status === newStatus) {
+      return;
     }
 
-    if (
-      order.status !== "CANCELLED" &&
-      newStatus === "CANCELLED"
-    ) {
-      setMessage(
-        `${order.order_id} cancelled. Ordered quantities were returned to stock.`
+    setUpdatingOrderId(order.order_id);
+    setError("");
+    setMessage("");
+
+    try {
+      const { error: updateError } =
+        await supabase.rpc(
+          "change_order_status",
+          {
+            p_order_id: order.order_id,
+            p_new_status: newStatus,
+          }
+        );
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      if (
+        order.status !== "CANCELLED" &&
+        newStatus === "CANCELLED"
+      ) {
+        setMessage(
+          `${order.order_id} cancelled. Ordered quantities were returned to stock.`
+        );
+      } else if (
+        order.status === "CANCELLED" &&
+        newStatus !== "CANCELLED"
+      ) {
+        setMessage(
+          `${order.order_id} reactivated. Ordered quantities were deducted from stock again.`
+        );
+      } else {
+        setMessage(
+          `${order.order_id} order status updated.`
+        );
+      }
+
+      await loadOrders(false);
+    } catch (statusError) {
+      console.error(
+        "Unable to update order status:",
+        statusError
       );
-    } else if (
-      order.status === "CANCELLED" &&
-      newStatus !== "CANCELLED"
-    ) {
-      setMessage(
-        `${order.order_id} reactivated. Ordered quantities were deducted from stock again.`
+
+      setError(
+        statusError instanceof Error
+          ? statusError.message
+          : "Unable to update the order status."
       );
-    } else {
-      setMessage(
-        `${order.order_id} order status updated.`
-      );
+
+      await loadOrders(false);
+    } finally {
+      setUpdatingOrderId(null);
     }
-
-    await loadOrders(false);
-  } catch (statusError) {
-    console.error(
-      "Unable to update order status:",
-      statusError
-    );
-
-    setError(
-      statusError instanceof Error
-        ? statusError.message
-        : "Unable to update the order status."
-    );
-
-    await loadOrders(false);
-  } finally {
-    setUpdatingOrderId(null);
   }
-}
 
 
   async function updatePaymentStatus(
@@ -674,6 +675,152 @@ export default function AdminOrdersPage() {
 
     await loadOrders(false);
   }
+  function openDeleteOrder(order: Order) {
+    setDeleteOrder(order);
+    setDeleteConfirmation(false);
+    setError("");
+    setMessage("");
+  }
+
+  function closeDeleteOrder() {
+    if (deletingOrder) {
+      return;
+    }
+
+    setDeleteOrder(null);
+    setDeleteConfirmation(false);
+  }
+
+  async function permanentlyDeleteOrder() {
+  if (
+    !deleteOrder ||
+    !deleteConfirmation ||
+    deletingOrder
+  ) {
+    return;
+  }
+
+  const orderToDelete = deleteOrder;
+  const orderId = orderToDelete.order_id;
+
+  setDeletingOrder(true);
+  setError("");
+  setMessage("");
+
+  try {
+    const {
+      data,
+      error: rpcError,
+    } = await supabase.rpc(
+      "delete_order_permanently",
+      {
+        p_order_id: orderId,
+      }
+    );
+
+    console.log(
+      "DELETE ORDER RPC RESULT:",
+      {
+        orderId,
+        data,
+        rpcError,
+      }
+    );
+
+    if (rpcError) {
+      console.error(
+        "DELETE ORDER RPC ERROR DETAILS:",
+        {
+          message: rpcError.message,
+          details: rpcError.details,
+          hint: rpcError.hint,
+          code: rpcError.code,
+        }
+      );
+
+      const completeErrorMessage = [
+        rpcError.message,
+        rpcError.details,
+        rpcError.hint,
+        rpcError.code
+          ? `Error code: ${rpcError.code}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      setError(
+        completeErrorMessage ||
+          "Unable to permanently delete the order."
+      );
+
+      return;
+    }
+
+    setOrders((currentOrders) =>
+      currentOrders.filter(
+        (order) =>
+          order.order_id !== orderId
+      )
+    );
+
+    setDeleteOrder(null);
+    setDeleteConfirmation(false);
+
+    setMessage(
+      orderToDelete.status === "CANCELLED"
+        ? `${orderId} has been permanently deleted. Stock was already restored when this order was cancelled.`
+        : `${orderId} has been permanently deleted and all ordered quantities were returned to stock.`
+    );
+
+    await loadOrders(false);
+  } catch (unexpectedError: unknown) {
+    console.error(
+      "UNEXPECTED DELETE ORDER ERROR:",
+      unexpectedError
+    );
+
+    let errorMessage =
+      "An unexpected error occurred while deleting the order.";
+
+    if (
+      unexpectedError &&
+      typeof unexpectedError === "object"
+    ) {
+      const possibleError =
+        unexpectedError as {
+          message?: string;
+          details?: string;
+          hint?: string;
+          code?: string;
+        };
+
+      errorMessage = [
+        possibleError.message,
+        possibleError.details,
+        possibleError.hint,
+        possibleError.code
+          ? `Error code: ${possibleError.code}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      if (!errorMessage) {
+        errorMessage =
+          JSON.stringify(unexpectedError);
+      }
+    } else if (
+      typeof unexpectedError === "string"
+    ) {
+      errorMessage = unexpectedError;
+    }
+
+    setError(errorMessage);
+  } finally {
+    setDeletingOrder(false);
+  }
+}
   async function downloadBill(order: Order) {
     try {
       const { jsPDF } = await import("jspdf");
@@ -1406,6 +1553,150 @@ export default function AdminOrdersPage() {
 
   return (
     <div className="text-[#101828]">
+      {deleteOrder && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-[#101828]/50 px-4 py-6 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget
+            ) {
+              closeDeleteOrder();
+            }
+          }}
+        >
+          <section className="w-full max-w-[450px] overflow-hidden rounded-[24px] border border-red-100 bg-white shadow-[0_30px_90px_rgba(16,24,40,0.30)]">
+            <div className="p-6 sm:p-7">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-50 text-red-600">
+                  <DeleteIcon className="h-6 w-6" />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-red-600">
+                    Permanent deletion
+                  </p>
+
+                  <h2 className="mt-1 text-[20px] font-semibold tracking-[-0.03em] text-[#101828]">
+                    Delete this order?
+                  </h2>
+
+                  <p className="mt-2 text-[12px] leading-5 text-[#667085]">
+                    Order{" "}
+                    <span className="font-semibold text-[#344054]">
+                      {deleteOrder.order_id}
+                    </span>{" "}
+                    will be permanently deleted. This
+                    action cannot be undone.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  aria-label="Close delete confirmation"
+                  onClick={closeDeleteOrder}
+                  disabled={deletingOrder}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[20px] leading-none text-[#98a2b3] transition hover:bg-[#f2f4f7] hover:text-[#475467] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-red-100 bg-red-50 px-4 py-4">
+                <p className="text-[11px] font-semibold text-red-800">
+                  What will happen?
+                </p>
+
+                <ul className="mt-2 space-y-2 text-[10px] leading-4 text-red-700">
+                  <li className="flex items-start gap-2">
+                    <span>•</span>
+
+                    <span>
+                      The order and all its items will
+                      be removed from the database.
+                    </span>
+                  </li>
+
+                  <li className="flex items-start gap-2">
+                    <span>•</span>
+
+                    <span>
+                      It will disappear from Admin
+                      Orders, customer order history
+                      and reports.
+                    </span>
+                  </li>
+
+                  <li className="flex items-start gap-2">
+                    <span>•</span>
+
+                    <span>
+                      {deleteOrder.status ===
+                        "CANCELLED"
+                        ? "This order is already cancelled, so its stock will not be added again."
+                        : "All ordered product quantities will be returned to stock."}
+                    </span>
+                  </li>
+                </ul>
+              </div>
+
+              <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-xl border border-[#e1e7ea] bg-[#f8faf9] px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={deleteConfirmation}
+                  disabled={deletingOrder}
+                  onChange={(event) =>
+                    setDeleteConfirmation(
+                      event.target.checked
+                    )
+                  }
+                  className="mt-0.5 h-4 w-4 cursor-pointer accent-red-600 disabled:cursor-not-allowed"
+                />
+
+                <span className="text-[10px] leading-4 text-[#475467]">
+                  I understand that{" "}
+                  <strong>
+                    {deleteOrder.order_id}
+                  </strong>{" "}
+                  will be permanently deleted and
+                  cannot be recovered.
+                </span>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-[#edf1f2] bg-[#fbfcfc] px-6 py-4">
+              <button
+                type="button"
+                onClick={closeDeleteOrder}
+                disabled={deletingOrder}
+                className="rounded-xl border border-[#d8e0e4] bg-white px-5 py-2.5 text-[10px] font-semibold text-[#475467] transition hover:bg-[#f8faf9] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                No, keep order
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void permanentlyDeleteOrder()
+                }
+                disabled={
+                  !deleteConfirmation ||
+                  deletingOrder
+                }
+                className="inline-flex min-w-[165px] items-center justify-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-[10px] font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
+              >
+                {deletingOrder && (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                )}
+
+                {deletingOrder
+                  ? "Deleting..."
+                  : "Yes, permanently delete"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      ``
       {newOrderNotification && (
         <div className="fixed right-5 top-5 z-[100] w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-[20px] border border-[#b7e4dc] bg-white shadow-[0_24px_60px_rgba(16,24,40,0.20)]">
           <div className="h-1 bg-gradient-to-r from-[#009d8b] to-[#5dd7ca]" />
@@ -1827,6 +2118,9 @@ export default function AdminOrdersPage() {
                       onOpenNote={
                         openOrderNote
                       }
+                      onDeleteOrder={
+                        openDeleteOrder
+                      }
                     />
                   )
                 )}
@@ -1914,6 +2208,7 @@ function OrderRow({
   onPaymentChange,
   onDownloadBill,
   onOpenNote,
+  onDeleteOrder,
 }: {
   order: Order;
   updating: boolean;
@@ -1929,6 +2224,9 @@ function OrderRow({
     order: Order
   ) => Promise<void>;
   onOpenNote: (
+    order: Order
+  ) => void;
+  onDeleteOrder: (
     order: Order
   ) => void;
 }) {
@@ -2111,8 +2409,8 @@ function OrderRow({
               onOpenNote(order)
             }
             className={`relative flex h-8 w-8 items-center justify-center rounded-lg border shadow-sm transition hover:shadow-md ${order.admin_note
-                ? "border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400"
-                : "border-[#dce7ea] bg-white text-[#667085] hover:border-[#81cdc5] hover:text-[#009d8b]"
+              ? "border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400"
+              : "border-[#dce7ea] bg-white text-[#667085] hover:border-[#81cdc5] hover:text-[#009d8b]"
               }`}
           >
             <NoteIcon className="h-4 w-4" />
@@ -2120,6 +2418,17 @@ function OrderRow({
             {order.admin_note && (
               <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-500" />
             )}
+          </button>
+          <button
+            type="button"
+            title="Permanently delete order"
+            aria-label={`Permanently delete ${order.order_id}`}
+            onClick={() =>
+              onDeleteOrder(order)
+            }
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-100 hover:text-red-700 hover:shadow-md"
+          >
+            <DeleteIcon className="h-4 w-4" />
           </button>
         </div>
       </td>
@@ -2320,6 +2629,35 @@ function NotificationBellIcon({
         stroke="white"
         strokeWidth="1.5"
       />
+    </svg>
+  );
+}
+
+function DeleteIcon({
+  className = "",
+}: {
+  className?: string;
+}) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 6h18" />
+
+      <path d="M8 6V4h8v2" />
+
+      <path d="M19 6l-1 14H6L5 6" />
+
+      <path d="M10 11v5" />
+
+      <path d="M14 11v5" />
     </svg>
   );
 }

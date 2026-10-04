@@ -19,7 +19,38 @@ type Product = {
 type CartItem = Product & {
   cart_quantity: number;
 };
+type LoggedInUser = {
+  user_id: string;
+  name: string;
+  phone: string;
+  role: string;
+  address?: string;
+  is_active?: boolean;
+};
+function getCustomerCartKey() {
+  const savedUser =
+    localStorage.getItem("user");
 
+  if (!savedUser) {
+    return null;
+  }
+
+  try {
+    const customer =
+      JSON.parse(savedUser) as LoggedInUser;
+
+    if (
+      customer.role !== "CUSTOMER" ||
+      !customer.user_id
+    ) {
+      return null;
+    }
+
+    return `customer_cart_${customer.user_id}`;
+  } catch {
+    return null;
+  }
+}
 type IconProps = {
   className?: string;
 };
@@ -40,16 +71,45 @@ export default function CustomerProductsPage() {
   const [customerProfile, setCustomerProfile] = useState<any>(null);
   useEffect(() => {
     void loadProducts();
-    loadSavedCart();
+
     const savedUser =
       localStorage.getItem("user");
 
-    if (savedUser) {
-      try {
-        setCustomerProfile(
-          JSON.parse(savedUser)
+    if (!savedUser) {
+      setCart([]);
+      setCustomerProfile(null);
+      setError(
+        "Your login session is unavailable. Please log in again."
+      );
+
+      return;
+    }
+
+    try {
+      const customer =
+        JSON.parse(savedUser) as LoggedInUser;
+
+      if (
+        customer.role !== "CUSTOMER" ||
+        !customer.user_id
+      ) {
+        setCart([]);
+        setCustomerProfile(null);
+        setError(
+          "A valid customer login is required."
         );
-      } catch { }
+
+        return;
+      }
+
+      setCustomerProfile(customer);
+      loadSavedCart();
+    } catch {
+      setCart([]);
+      setCustomerProfile(null);
+      setError(
+        "Your login session is invalid. Please log in again."
+      );
     }
   }, []);
 
@@ -74,17 +134,35 @@ export default function CustomerProductsPage() {
   }
 
   function loadSavedCart() {
-    const savedCart = localStorage.getItem("customer_cart");
+    const cartKey = getCustomerCartKey();
+
+    if (!cartKey) {
+      setCart([]);
+      return;
+    }
+
+    const savedCart =
+      localStorage.getItem(cartKey);
 
     if (!savedCart) {
+      setCart([]);
       return;
     }
 
     try {
-      const parsedCart = JSON.parse(savedCart) as CartItem[];
+      const parsedCart =
+        JSON.parse(savedCart) as CartItem[];
+
+      if (!Array.isArray(parsedCart)) {
+        throw new Error(
+          "Invalid saved cart."
+        );
+      }
+
       setCart(parsedCart);
     } catch {
-      localStorage.removeItem("customer_cart");
+      localStorage.removeItem(cartKey);
+      setCart([]);
     }
   }
 
@@ -160,11 +238,25 @@ export default function CustomerProductsPage() {
       return;
     }
 
-    setCart((currentCart) => {
-      const existingItem = currentCart.find(
-        (item) =>
-          item.product_id === product.product_id
+    const cartKey = getCustomerCartKey();
+
+    if (!cartKey) {
+      setError(
+        "A valid customer login is required before adding products to the cart."
       );
+
+      return;
+    }
+
+    setError("");
+
+    setCart((currentCart) => {
+      const existingItem =
+        currentCart.find(
+          (item) =>
+            item.product_id ===
+            product.product_id
+        );
 
       if (
         existingItem &&
@@ -176,7 +268,8 @@ export default function CustomerProductsPage() {
 
       const updatedCart = existingItem
         ? currentCart.map((item) =>
-          item.product_id === product.product_id
+          item.product_id ===
+            product.product_id
             ? {
               ...item,
               cart_quantity:
@@ -193,7 +286,7 @@ export default function CustomerProductsPage() {
         ];
 
       localStorage.setItem(
-        "customer_cart",
+        cartKey,
         JSON.stringify(updatedCart)
       );
 

@@ -41,13 +41,13 @@ type CustomerOrderItem = {
   line_total: number;
 
   products:
-    | {
-        product_name: string;
-      }
-    | {
-        product_name: string;
-      }[]
-    | null;
+  | {
+    product_name: string;
+  }
+  | {
+    product_name: string;
+  }[]
+  | null;
 };
 
 type CustomerOrder = {
@@ -65,7 +65,24 @@ type CustomerOrder = {
   order_items: CustomerOrderItem[];
 };
 type CustomerStatus = "ALL" | "ACTIVE" | "INACTIVE";
+type NewCustomerForm = {
+  name: string;
+  phone: string;
+  password: string;
+  address: string;
+  is_active: boolean;
+};
 
+const EMPTY_CUSTOMER_FORM: NewCustomerForm = {
+  name: "",
+  phone: "",
+  password: "",
+  address: "",
+  is_active: true,
+};
+
+const CUSTOMER_NAME_MAX_LENGTH = 60;
+const CUSTOMER_ADDRESS_MAX_LENGTH = 250;
 type IconProps = {
   className?: string;
 };
@@ -141,12 +158,16 @@ function SummaryCard({
 export default function AdminCustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [updatingId, setUpdatingId] = useState<string | null>(
-    null
-  );
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] =useState<CustomerStatus>("ALL");
+  const [statusFilter, setStatusFilter] = useState<CustomerStatus>("ALL");
+
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [newCustomer, setNewCustomer] = useState<NewCustomerForm>(EMPTY_CUSTOMER_FORM);
+  const [addingCustomer, setAddingCustomer] = useState(false);
+  const [addCustomerError, setAddCustomerError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -156,12 +177,71 @@ export default function AdminCustomersPage() {
   const [historyLoading, setHistoryLoading,] = useState(false);
   const [historyError, setHistoryError,] = useState("");
 
-const fetchCustomers = useCallback(
+  const customerFormValidation = useMemo(() => {
+    const name = newCustomer.name.trim();
+    const phone = newCustomer.phone.trim();
+    const password = newCustomer.password;
+    const address = newCustomer.address.trim();
+
+    const nameValid =
+      name.length >= 2 &&
+      name.length <= CUSTOMER_NAME_MAX_LENGTH;
+
+    const phoneValid =
+      /^\d{10}$/.test(phone);
+
+    const passwordLengthValid =
+      password.length >= 8 &&
+      password.length <= 10;
+
+    const passwordUppercaseValid =
+      /[A-Z]/.test(password);
+
+    const passwordLowercaseValid =
+      /[a-z]/.test(password);
+
+    const passwordNumberValid =
+      /\d/.test(password);
+
+    const passwordSpecialValid =
+      /[^A-Za-z0-9]/.test(password);
+
+    const passwordValid =
+      passwordLengthValid &&
+      passwordUppercaseValid &&
+      passwordLowercaseValid &&
+      passwordNumberValid &&
+      passwordSpecialValid;
+
+    const addressValid =
+      address.length >= 5 &&
+      address.length <=
+      CUSTOMER_ADDRESS_MAX_LENGTH;
+
+    return {
+      nameValid,
+      phoneValid,
+      passwordLengthValid,
+      passwordUppercaseValid,
+      passwordLowercaseValid,
+      passwordNumberValid,
+      passwordSpecialValid,
+      passwordValid,
+      addressValid,
+
+      formValid:
+        nameValid &&
+        phoneValid &&
+        passwordValid &&
+        addressValid,
+    };
+  }, [newCustomer]);
+
+  const fetchCustomers = useCallback(
     async (showLoader = false) => {
       if (showLoader) {
         setLoading(true);
       }
-
       const { data, error: fetchError } = await supabase
         .from("users")
         .select(
@@ -188,18 +268,18 @@ const fetchCustomers = useCallback(
   );
 
   async function openOrderHistory(
-  customer: Customer
-) {
-  setHistoryCustomer(customer);
-  setCustomerOrders([]);
-  setHistoryError("");
-  setHistoryLoading(true);
+    customer: Customer
+  ) {
+    setHistoryCustomer(customer);
+    setCustomerOrders([]);
+    setHistoryError("");
+    setHistoryLoading(true);
 
-  try {
-    const { data, error: orderError } =
-      await supabase
-        .from("orders")
-        .select(`
+    try {
+      const { data, error: orderError } =
+        await supabase
+          .from("orders")
+          .select(`
           order_id,
           customer_id,
           subtotal,
@@ -225,44 +305,44 @@ const fetchCustomers = useCallback(
             )
           )
         `)
-        .eq(
-          "customer_id",
-          customer.user_id
-        )
-        .order("created_at", {
-          ascending: false,
-        });
+          .eq(
+            "customer_id",
+            customer.user_id
+          )
+          .order("created_at", {
+            ascending: false,
+          });
 
-    if (orderError) {
-      throw orderError;
+      if (orderError) {
+        throw orderError;
+      }
+
+      setCustomerOrders(
+        (data ?? []) as unknown as CustomerOrder[]
+      );
+    } catch (historyLoadError) {
+      console.error(
+        "Unable to load customer order history:",
+        historyLoadError
+      );
+
+      setHistoryError(
+        historyLoadError instanceof Error
+          ? historyLoadError.message
+          : "Unable to load customer order history."
+      );
+
+      setCustomerOrders([]);
+    } finally {
+      setHistoryLoading(false);
     }
-
-    setCustomerOrders(
-      (data ?? []) as unknown as CustomerOrder[]
-    );
-  } catch (historyLoadError) {
-    console.error(
-      "Unable to load customer order history:",
-      historyLoadError
-    );
-
-    setHistoryError(
-      historyLoadError instanceof Error
-        ? historyLoadError.message
-        : "Unable to load customer order history."
-    );
-
-    setCustomerOrders([]);
-  } finally {
-    setHistoryLoading(false);
   }
-}
 
-function closeOrderHistory() {
-  setHistoryCustomer(null);
-  setCustomerOrders([]);
-  setHistoryError("");
-}
+  function closeOrderHistory() {
+    setHistoryCustomer(null);
+    setCustomerOrders([]);
+    setHistoryError("");
+  }
   useEffect(() => {
     void fetchCustomers(true);
 
@@ -346,9 +426,9 @@ function closeOrderHistory() {
       currentCustomers.map((currentCustomer) =>
         currentCustomer.user_id === customer.user_id
           ? {
-              ...currentCustomer,
-              is_active: newStatus,
-            }
+            ...currentCustomer,
+            is_active: newStatus,
+          }
           : currentCustomer
       )
     );
@@ -362,6 +442,137 @@ function closeOrderHistory() {
     setUpdatingId(null);
   }
 
+  function openAddCustomerModal() {
+    setNewCustomer(EMPTY_CUSTOMER_FORM);
+    setAddCustomerError("");
+    setShowPassword(false);
+    setShowAddCustomer(true);
+  }
+
+  function closeAddCustomerModal() {
+    if (addingCustomer) {
+      return;
+    }
+
+    setShowAddCustomer(false);
+    setNewCustomer(EMPTY_CUSTOMER_FORM);
+    setAddCustomerError("");
+    setShowPassword(false);
+  }
+
+  async function addNewCustomer(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (
+      !customerFormValidation.formValid ||
+      addingCustomer
+    ) {
+      return;
+    }
+
+    setAddingCustomer(true);
+    setAddCustomerError("");
+    setError("");
+    setMessage("");
+
+    const cleanedName =
+      newCustomer.name
+        .trim()
+        .replace(/\s+/g, " ");
+
+    const cleanedPhone =
+      newCustomer.phone.trim();
+
+    const cleanedAddress =
+      newCustomer.address
+        .trim()
+        .replace(/\s+/g, " ");
+
+    try {
+      const {
+        data: existingCustomer,
+        error: phoneCheckError,
+      } = await supabase
+        .from("users")
+        .select("user_id")
+        .eq("phone", cleanedPhone)
+        .maybeSingle();
+
+      if (phoneCheckError) {
+        throw phoneCheckError;
+      }
+
+      if (existingCustomer) {
+        throw new Error(
+          "A customer with this phone number already exists."
+        );
+      }
+
+      const {
+        data: createdCustomer,
+        error: insertError,
+      } = await supabase
+        .from("users")
+        .insert({
+          name: cleanedName,
+          phone: cleanedPhone,
+          password: newCustomer.password,
+          address: cleanedAddress,
+          role: "CUSTOMER",
+          is_active: newCustomer.is_active,
+        })
+        .select(
+          `
+          user_id,
+          name,
+          phone,
+          role,
+          address,
+          is_active,
+          created_at
+        `
+        )
+        .single();
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      setCustomers((currentCustomers) => [
+        createdCustomer as Customer,
+        ...currentCustomers.filter(
+          (customer) =>
+            customer.user_id !==
+            createdCustomer.user_id
+        ),
+      ]);
+
+      setMessage(
+        `${cleanedName} has been added successfully.`
+      );
+
+      setShowAddCustomer(false);
+      setNewCustomer(EMPTY_CUSTOMER_FORM);
+      setShowPassword(false);
+
+      void fetchCustomers(false);
+    } catch (customerAddError) {
+      console.error(
+        "Unable to add customer:",
+        customerAddError
+      );
+
+      setAddCustomerError(
+        customerAddError instanceof Error
+          ? customerAddError.message
+          : "Unable to add the customer."
+      );
+    } finally {
+      setAddingCustomer(false);
+    }
+  }
   function clearFilters() {
     setSearch("");
     setStatusFilter("ALL");
@@ -386,101 +597,453 @@ function closeOrderHistory() {
 
   return (
     <div className="text-[#101828]">
-      {historyCustomer && (
-  <div
-    className="fixed inset-0 z-[120] flex items-center justify-center bg-[#101828]/45 px-4 py-6 backdrop-blur-sm"
-    onMouseDown={(event) => {
-      if (
-        event.target ===
-        event.currentTarget
-      ) {
-        closeOrderHistory();
-      }
-    }}
-  >
-    <section className="flex max-h-[90vh] w-full max-w-[980px] flex-col overflow-hidden rounded-[26px] border border-[#e1e7ea] bg-white shadow-[0_30px_90px_rgba(16,24,40,0.28)]">
-      <div className="flex shrink-0 items-start justify-between border-b border-[#edf1f2] px-6 py-5 sm:px-7">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#009d8b]">
-            Customer order history
-          </p>
-
-          <h2 className="mt-1 text-[22px] font-semibold tracking-[-0.035em] text-[#101828]">
-            {historyCustomer.name}
-          </h2>
-
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#667085]">
-            <span>
-              ID: {historyCustomer.user_id}
-            </span>
-
-            <span>
-              Phone: {historyCustomer.phone}
-            </span>
-
-            <span>
-              {historyCustomer.address}
-            </span>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          aria-label="Close order history"
-          onClick={closeOrderHistory}
-          className="flex h-9 w-9 items-center justify-center rounded-xl text-[22px] leading-none text-[#98a2b3] transition hover:bg-[#f2f4f7] hover:text-[#475467]"
+      {showAddCustomer && (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-[#101828]/50 px-4 py-6 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget
+            ) {
+              closeAddCustomerModal();
+            }
+          }}
         >
-          ×
-        </button>
-      </div>
+          <section className="flex max-h-[92vh] w-full max-w-[620px] flex-col overflow-hidden rounded-[26px] border border-[#e1e7ea] bg-white shadow-[0_30px_90px_rgba(16,24,40,0.3)]">
+            <div className="flex shrink-0 items-start justify-between border-b border-[#edf1f2] px-6 py-5 sm:px-7">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#009d8b]">
+                  Customer management
+                </p>
 
-      <div className="flex-1 overflow-y-auto bg-[#f8faf9] p-5 sm:p-7">
-        {historyError && (
-          <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-700">
-            {historyError}
-          </div>
-        )}
+                <h2 className="mt-1 text-[22px] font-semibold tracking-[-0.035em] text-[#101828]">
+                  Add new customer
+                </h2>
 
-        {historyLoading ? (
-          <div className="py-20 text-center">
-            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#cfe9e5] border-t-[#009d8b]" />
+                <p className="mt-1 text-[11px] text-[#667085]">
+                  Enter the customer&apos;s login and
+                  contact information.
+                </p>
+              </div>
 
-            <p className="mt-4 text-[12px] text-[#667085]">
-              Loading order history...
-            </p>
-          </div>
-        ) : customerOrders.length === 0 ? (
-          <div className="rounded-[22px] border border-dashed border-[#d7e1e0] bg-white px-6 py-20 text-center">
-            <HistoryIcon className="mx-auto h-8 w-8 text-[#98a2b3]" />
+              <button
+                type="button"
+                aria-label="Close add customer form"
+                onClick={closeAddCustomerModal}
+                disabled={addingCustomer}
+                className="flex h-9 w-9 items-center justify-center rounded-xl text-[22px] leading-none text-[#98a2b3] transition hover:bg-[#f2f4f7] hover:text-[#475467] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                ×
+              </button>
+            </div>
 
-            <h3 className="mt-4 text-[16px] font-semibold text-[#344054]">
-              No orders found
-            </h3>
+            <form
+              onSubmit={addNewCustomer}
+              className="flex-1 overflow-y-auto"
+            >
+              <div className="space-y-5 px-6 py-6 sm:px-7">
+                {addCustomerError && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[11px] leading-5 text-red-700">
+                    {addCustomerError}
+                  </div>
+                )}
 
-            <p className="mt-1 text-[11px] text-[#98a2b3]">
-              This customer has not placed any orders.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-5">
-            <CustomerHistorySummary
-              orders={customerOrders}
-            />
+                <div>
+                  <label
+                    htmlFor="customer-name"
+                    className="mb-2 block text-[11px] font-semibold text-[#344054]"
+                  >
+                    Customer name
+                  </label>
 
-            {customerOrders.map(
-              (order) => (
-                <CustomerOrderCard
-                  key={order.order_id}
-                  order={order}
-                />
-              )
-            )}
-          </div>
-        )}
-      </div>
-    </section>
-  </div>
-)}
+                  <input
+                    id="customer-name"
+                    type="text"
+                    autoComplete="name"
+                    maxLength={
+                      CUSTOMER_NAME_MAX_LENGTH
+                    }
+                    value={newCustomer.name}
+                    onChange={(event) => {
+                      const value =
+                        event.target.value;
+
+                      if (
+                        /^[A-Za-z\s.'-]*$/.test(
+                          value
+                        )
+                      ) {
+                        setNewCustomer(
+                          (current) => ({
+                            ...current,
+                            name: value,
+                          })
+                        );
+                      }
+                    }}
+                    placeholder="Enter customer name"
+                    className="w-full rounded-xl border border-[#dfe5e8] bg-[#fbfcfc] px-4 py-3 text-[13px] text-[#101828] outline-none placeholder:text-[#98a2b3] focus:border-[#81cdc5] focus:bg-white focus:ring-4 focus:ring-[#e6f6f3]"
+                  />
+
+                  <div className="mt-1.5 flex items-center justify-between">
+                    <p className="text-[9px] text-[#98a2b3]">
+                      Minimum 2 characters. Letters,
+                      spaces, apostrophes and hyphens
+                      are allowed.
+                    </p>
+
+                    <span className="text-[9px] text-[#98a2b3]">
+                      {newCustomer.name.length}/
+                      {CUSTOMER_NAME_MAX_LENGTH}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="customer-phone"
+                    className="mb-2 block text-[11px] font-semibold text-[#344054]"
+                  >
+                    Phone number
+                  </label>
+
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[12px] font-medium text-[#667085]">
+                      +91
+                    </span>
+
+                    <input
+                      id="customer-phone"
+                      type="tel"
+                      inputMode="numeric"
+                      autoComplete="tel"
+                      maxLength={10}
+                      value={newCustomer.phone}
+                      onChange={(event) => {
+                        const numbersOnly =
+                          event.target.value
+                            .replace(/\D/g, "")
+                            .slice(0, 10);
+
+                        setNewCustomer(
+                          (current) => ({
+                            ...current,
+                            phone: numbersOnly,
+                          })
+                        );
+                      }}
+                      placeholder="Enter 10-digit number"
+                      className="w-full rounded-xl border border-[#dfe5e8] bg-[#fbfcfc] py-3 pl-12 pr-4 text-[13px] text-[#101828] outline-none placeholder:text-[#98a2b3] focus:border-[#81cdc5] focus:bg-white focus:ring-4 focus:ring-[#e6f6f3]"
+                    />
+                  </div>
+
+                  <div className="mt-1.5 flex items-center justify-between">
+                    <p
+                      className={`text-[9px] ${newCustomer.phone.length >
+                          0 &&
+                          !customerFormValidation.phoneValid
+                          ? "text-red-600"
+                          : "text-[#98a2b3]"
+                        }`}
+                    >
+                      Phone number must contain exactly
+                      10 digits.
+                    </p>
+
+                    <span className="text-[9px] text-[#98a2b3]">
+                      {newCustomer.phone.length}/10
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="customer-password"
+                    className="mb-2 block text-[11px] font-semibold text-[#344054]"
+                  >
+                    Password
+                  </label>
+
+                  <div className="relative">
+                    <input
+                      id="customer-password"
+                      type={
+                        showPassword
+                          ? "text"
+                          : "password"
+                      }
+                      autoComplete="new-password"
+                      maxLength={10}
+                      value={newCustomer.password}
+                      onChange={(event) =>
+                        setNewCustomer(
+                          (current) => ({
+                            ...current,
+                            password:
+                              event.target.value,
+                          })
+                        )
+                      }
+                      placeholder="Create a secure password"
+                      className="w-full rounded-xl border border-[#dfe5e8] bg-[#fbfcfc] py-3 pl-4 pr-16 text-[13px] text-[#101828] outline-none placeholder:text-[#98a2b3] focus:border-[#81cdc5] focus:bg-white focus:ring-4 focus:ring-[#e6f6f3]"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowPassword(
+                          (current) => !current
+                        )
+                      }
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-[#009d8b] hover:text-[#007f72]"
+                    >
+                      {showPassword
+                        ? "Hide"
+                        : "Show"}
+                    </button>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <PasswordRequirement
+                      valid={
+                        customerFormValidation.passwordLengthValid
+                      }
+                      label="8–10 characters"
+                    />
+
+                    <PasswordRequirement
+                      valid={
+                        customerFormValidation.passwordUppercaseValid
+                      }
+                      label="One uppercase letter"
+                    />
+
+                    <PasswordRequirement
+                      valid={
+                        customerFormValidation.passwordLowercaseValid
+                      }
+                      label="One lowercase letter"
+                    />
+
+                    <PasswordRequirement
+                      valid={
+                        customerFormValidation.passwordNumberValid
+                      }
+                      label="One number"
+                    />
+
+                    <PasswordRequirement
+                      valid={
+                        customerFormValidation.passwordSpecialValid
+                      }
+                      label="One special character"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="customer-address"
+                    className="mb-2 block text-[11px] font-semibold text-[#344054]"
+                  >
+                    Address
+                  </label>
+
+                  <textarea
+                    id="customer-address"
+                    rows={4}
+                    maxLength={
+                      CUSTOMER_ADDRESS_MAX_LENGTH
+                    }
+                    value={newCustomer.address}
+                    onChange={(event) =>
+                      setNewCustomer(
+                        (current) => ({
+                          ...current,
+                          address:
+                            event.target.value,
+                        })
+                      )
+                    }
+                    placeholder="Enter complete customer address"
+                    className="w-full resize-none rounded-xl border border-[#dfe5e8] bg-[#fbfcfc] px-4 py-3 text-[13px] leading-5 text-[#101828] outline-none placeholder:text-[#98a2b3] focus:border-[#81cdc5] focus:bg-white focus:ring-4 focus:ring-[#e6f6f3]"
+                  />
+
+                  <div className="mt-1.5 flex items-center justify-between">
+                    <p
+                      className={`text-[9px] ${newCustomer.address.length >
+                          0 &&
+                          !customerFormValidation.addressValid
+                          ? "text-red-600"
+                          : "text-[#98a2b3]"
+                        }`}
+                    >
+                      Enter at least 5 characters.
+                    </p>
+
+                    <span className="text-[9px] text-[#98a2b3]">
+                      {newCustomer.address.length}/
+                      {CUSTOMER_ADDRESS_MAX_LENGTH}
+                    </span>
+                  </div>
+                </div>
+
+                <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-[#e1e7ea] bg-[#f8faf9] px-4 py-4">
+                  <div>
+                    <p className="text-[11px] font-semibold text-[#344054]">
+                      Activate customer account
+                    </p>
+
+                    <p className="mt-1 text-[9px] text-[#98a2b3]">
+                      The customer can sign in
+                      immediately after creation.
+                    </p>
+                  </div>
+
+                  <input
+                    type="checkbox"
+                    checked={
+                      newCustomer.is_active
+                    }
+                    onChange={(event) =>
+                      setNewCustomer(
+                        (current) => ({
+                          ...current,
+                          is_active:
+                            event.target.checked,
+                        })
+                      )
+                    }
+                    className="h-5 w-5 cursor-pointer accent-[#009d8b]"
+                  />
+                </label>
+              </div>
+
+              <div className="flex shrink-0 items-center justify-end gap-3 border-t border-[#edf1f2] bg-white px-6 py-4 sm:px-7">
+                <button
+                  type="button"
+                  onClick={closeAddCustomerModal}
+                  disabled={addingCustomer}
+                  className="rounded-xl border border-[#d8e0e4] bg-white px-5 py-2.5 text-[11px] font-semibold text-[#475467] transition hover:bg-[#f8faf9] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={
+                    !customerFormValidation.formValid ||
+                    addingCustomer
+                  }
+                  className="inline-flex min-w-[140px] items-center justify-center gap-2 rounded-xl bg-[#009d8b] px-5 py-2.5 text-[11px] font-semibold text-white shadow-[0_4px_12px_rgba(0,157,139,0.22)] transition hover:bg-[#008f80] disabled:cursor-not-allowed disabled:bg-[#b9c7c5] disabled:shadow-none"
+                >
+                  {addingCustomer && (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  )}
+
+                  {addingCustomer
+                    ? "Adding customer..."
+                    : "Add customer"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+      {historyCustomer && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-[#101828]/45 px-4 py-6 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
+              closeOrderHistory();
+            }
+          }}
+        >
+          <section className="flex max-h-[90vh] w-full max-w-[980px] flex-col overflow-hidden rounded-[26px] border border-[#e1e7ea] bg-white shadow-[0_30px_90px_rgba(16,24,40,0.28)]">
+            <div className="flex shrink-0 items-start justify-between border-b border-[#edf1f2] px-6 py-5 sm:px-7">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#009d8b]">
+                  Customer order history
+                </p>
+
+                <h2 className="mt-1 text-[22px] font-semibold tracking-[-0.035em] text-[#101828]">
+                  {historyCustomer.name}
+                </h2>
+
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[#667085]">
+                  <span>
+                    ID: {historyCustomer.user_id}
+                  </span>
+
+                  <span>
+                    Phone: {historyCustomer.phone}
+                  </span>
+
+                  <span>
+                    {historyCustomer.address}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                aria-label="Close order history"
+                onClick={closeOrderHistory}
+                className="flex h-9 w-9 items-center justify-center rounded-xl text-[22px] leading-none text-[#98a2b3] transition hover:bg-[#f2f4f7] hover:text-[#475467]"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto bg-[#f8faf9] p-5 sm:p-7">
+              {historyError && (
+                <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-700">
+                  {historyError}
+                </div>
+              )}
+
+              {historyLoading ? (
+                <div className="py-20 text-center">
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#cfe9e5] border-t-[#009d8b]" />
+
+                  <p className="mt-4 text-[12px] text-[#667085]">
+                    Loading order history...
+                  </p>
+                </div>
+              ) : customerOrders.length === 0 ? (
+                <div className="rounded-[22px] border border-dashed border-[#d7e1e0] bg-white px-6 py-20 text-center">
+                  <HistoryIcon className="mx-auto h-8 w-8 text-[#98a2b3]" />
+
+                  <h3 className="mt-4 text-[16px] font-semibold text-[#344054]">
+                    No orders found
+                  </h3>
+
+                  <p className="mt-1 text-[11px] text-[#98a2b3]">
+                    This customer has not placed any orders.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <CustomerHistorySummary
+                    orders={customerOrders}
+                  />
+
+                  {customerOrders.map(
+                    (order) => (
+                      <CustomerOrderCard
+                        key={order.order_id}
+                        order={order}
+                      />
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
       <section className="mb-6 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[12px] font-semibold tracking-wide text-[#009d8b]">
@@ -496,26 +1059,50 @@ function closeOrderHistory() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => void fetchCustomers(true)}
-          className="inline-flex w-fit items-center gap-2 rounded-xl border border-[#d8e0e4] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#475467] shadow-sm transition hover:border-[#9ddbd4] hover:bg-[#f5fbfa] hover:text-[#008f80]"
-        >
-          <svg
-            className="h-4 w-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            aria-hidden="true"
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={openAddCustomerModal}
+            className="inline-flex w-fit items-center gap-2 rounded-xl bg-[#009d8b] px-4 py-2.5 text-[12px] font-semibold text-white shadow-[0_4px_12px_rgba(0,157,139,0.22)] transition hover:bg-[#008f80] hover:shadow-[0_6px_16px_rgba(0,157,139,0.28)]"
           >
-            <path d="M20 6v5h-5" />
-            <path d="M4 18v-5h5" />
-            <path d="M6.1 9a7 7 0 0 1 11.7-2.6L20 11" />
-            <path d="M17.9 15a7 7 0 0 1-11.7 2.6L4 13" />
-          </svg>
-          Refresh customers
-        </button>
+            <svg
+              className="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+
+            Add new customer
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              void fetchCustomers(true)
+            }
+            className="inline-flex w-fit items-center gap-2 rounded-xl border border-[#d8e0e4] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#475467] shadow-sm transition hover:border-[#9ddbd4] hover:bg-[#f5fbfa] hover:text-[#008f80]"
+          >
+            <svg
+              className="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden="true"
+            >
+              <path d="M20 6v5h-5" />
+              <path d="M4 18v-5h5" />
+              <path d="M6.1 9a7 7 0 0 1 11.7-2.6L20 11" />
+              <path d="M17.9 15a7 7 0 0 1-11.7 2.6L4 13" />
+            </svg>
+
+            Refresh customers
+          </button>
+        </div>
       </section>
 
       <section className="mb-6 grid gap-4 sm:grid-cols-3">
@@ -546,11 +1133,10 @@ function closeOrderHistory() {
 
       {(error || message) && (
         <div
-          className={`mb-5 rounded-xl border px-4 py-3 text-[12px] ${
-            error
+          className={`mb-5 rounded-xl border px-4 py-3 text-[12px] ${error
               ? "border-red-200 bg-red-50 text-red-700"
               : "border-emerald-200 bg-emerald-50 text-emerald-700"
-          }`}
+            }`}
         >
           {error || message}
         </div>
@@ -728,7 +1314,7 @@ function CustomerOrderCard({
   const balance = Math.max(
     0,
     Number(order.total_amount) -
-      Number(order.paid_amount)
+    Number(order.paid_amount)
   );
 
   return (
@@ -1135,11 +1721,10 @@ function CustomerCard({
         </div>
 
         <span
-          className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${
-            customer.is_active
+          className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold ${customer.is_active
               ? "bg-[#eafbf7] text-[#009d8b]"
               : "bg-[#f3f5f6] text-[#667085]"
-          }`}
+            }`}
         >
           {customer.is_active ? "Active" : "Inactive"}
         </span>
@@ -1163,47 +1748,45 @@ function CustomerCard({
       </div>
 
       <div className="mt-5 flex items-center justify-between gap-3 border-t border-[#edf2f3] pt-4">
-  <div className="flex flex-wrap items-center gap-2">
-    <button
-      type="button"
-      onClick={() =>
-        onToggleStatus(customer)
-      }
-      disabled={updating}
-      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[11px] font-semibold transition ${
-        customer.is_active
-          ? "bg-[#fff3f2] text-[#c4320a] hover:bg-[#ffefe9]"
-          : "bg-[#ebfbf7] text-[#009d8b] hover:bg-[#dffaf4]"
-      } ${
-        updating
-          ? "cursor-not-allowed opacity-70"
-          : ""
-      }`}
-    >
-      {updating
-        ? "Updating..."
-        : customer.is_active
-          ? "Deactivate"
-          : "Activate"}
-    </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              onToggleStatus(customer)
+            }
+            disabled={updating}
+            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[11px] font-semibold transition ${customer.is_active
+                ? "bg-[#fff3f2] text-[#c4320a] hover:bg-[#ffefe9]"
+                : "bg-[#ebfbf7] text-[#009d8b] hover:bg-[#dffaf4]"
+              } ${updating
+                ? "cursor-not-allowed opacity-70"
+                : ""
+              }`}
+          >
+            {updating
+              ? "Updating..."
+              : customer.is_active
+                ? "Deactivate"
+                : "Activate"}
+          </button>
 
-    <button
-      type="button"
-      onClick={() =>
-        onOpenHistory(customer)
-      }
-      className="inline-flex items-center gap-2 rounded-xl border border-[#cfe2df] bg-[#f5fbfa] px-3 py-2 text-[11px] font-semibold text-[#008f80] transition hover:border-[#81cdc5] hover:bg-[#eaf8f5]"
-    >
-      <HistoryIcon className="h-4 w-4" />
+          <button
+            type="button"
+            onClick={() =>
+              onOpenHistory(customer)
+            }
+            className="inline-flex items-center gap-2 rounded-xl border border-[#cfe2df] bg-[#f5fbfa] px-3 py-2 text-[11px] font-semibold text-[#008f80] transition hover:border-[#81cdc5] hover:bg-[#eaf8f5]"
+          >
+            <HistoryIcon className="h-4 w-4" />
 
-      Order history
-    </button>
-  </div>
+            Order history
+          </button>
+        </div>
 
-  <div className="hidden text-[10px] text-[#98a2b3] xl:block">
-    {customer.role}
-  </div>
-</div>
+        <div className="hidden text-[10px] text-[#98a2b3] xl:block">
+          {customer.role}
+        </div>
+      </div>
     </article>
   );
 }
@@ -1255,6 +1838,34 @@ function formatOrderDate(
       minute: "2-digit",
     }
   ).format(date);
+}
+
+function PasswordRequirement({
+  valid,
+  label,
+}: {
+  valid: boolean;
+  label: string;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-2 text-[9px] ${valid
+          ? "text-emerald-600"
+          : "text-[#98a2b3]"
+        }`}
+    >
+      <span
+        className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] ${valid
+            ? "bg-emerald-100 text-emerald-700"
+            : "bg-[#f2f4f7] text-[#98a2b3]"
+          }`}
+      >
+        {valid ? "✓" : "•"}
+      </span>
+
+      {label}
+    </div>
+  );
 }
 
 function HistoryIcon({
