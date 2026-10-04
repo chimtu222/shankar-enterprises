@@ -215,7 +215,7 @@ export default function CustomerProductsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f3f7f9] text-[#101828]">
+    <main className="h-screen overflow-y-auto bg-[#f3f7f9] text-[#101828]">
       <CustomerHeader
         search={search}
         setSearch={setSearch}
