@@ -13,8 +13,7 @@ import { supabase } from "@/lib/supabase";
 type OrderStatus =
   | "PENDING"
   | "IN_PROCESS"
-  | "PACKED"
-  | "IN_TRANSIT"
+  | "PARTIAL"
   | "DELIVERED"
   | "CANCELLED";
 
@@ -445,9 +444,8 @@ function OrderStatusBadge({
 }) {
   const labels: Record<OrderStatus, string> = {
     PENDING: "Pending",
-    IN_PROCESS: "In process",
-    PACKED: "Packed",
-    IN_TRANSIT: "In transit",
+    IN_PROCESS: "In Process",
+    PARTIAL: "Partial",
     DELIVERED: "Delivered",
     CANCELLED: "Cancelled",
   };
@@ -456,10 +454,8 @@ function OrderStatusBadge({
     PENDING:
       "border-amber-200 bg-amber-50 text-amber-700",
     IN_PROCESS:
-      "border-amber-200 bg-amber-50 text-amber-700",
-    PACKED:
       "border-purple-200 bg-purple-50 text-purple-700",
-    IN_TRANSIT:
+    PARTIAL:
       "border-blue-200 bg-blue-50 text-blue-700",
     DELIVERED:
       "border-emerald-200 bg-emerald-50 text-emerald-700",
