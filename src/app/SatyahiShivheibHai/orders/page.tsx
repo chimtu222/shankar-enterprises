@@ -1696,7 +1696,6 @@ export default function AdminOrdersPage() {
           </section>
         </div>
       )}
-      ``
       {newOrderNotification && (
         <div className="fixed right-5 top-5 z-[100] w-[340px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-[20px] border border-[#b7e4dc] bg-white shadow-[0_24px_60px_rgba(16,24,40,0.20)]">
           <div className="h-1 bg-gradient-to-r from-[#009d8b] to-[#5dd7ca]" />
