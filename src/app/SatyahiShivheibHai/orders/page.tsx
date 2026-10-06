@@ -1947,9 +1947,22 @@ export default function AdminOrdersPage() {
           onClick={() =>
             void loadOrders(true)
           }
-          className="w-fit rounded-xl border border-[#d8e0e4] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#475467] shadow-sm transition hover:border-[#9ddbd4] hover:bg-[#f5fbfa] hover:text-[#008f80]"
+          className="inline-flex w-fit items-center gap-2 rounded-xl border border-[#d8e0e4] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#475467] shadow-sm transition hover:border-[#9ddbd4] hover:bg-[#f5fbfa] hover:text-[#008f80]"
         >
-          Refresh orders
+          <svg
+              className="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden="true"
+            >
+              <path d="M20 6v5h-5" />
+              <path d="M4 18v-5h5" />
+              <path d="M6.1 9a7 7 0 0 1 11.7-2.6L20 11" />
+              <path d="M17.9 15a7 7 0 0 1-11.7 2.6L4 13" />
+            </svg>
+          Refresh Orders
         </button>
       </section>
 

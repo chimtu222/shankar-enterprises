@@ -1100,7 +1100,7 @@ export default function AdminCustomersPage() {
               <path d="M17.9 15a7 7 0 0 1-11.7 2.6L4 13" />
             </svg>
 
-            Refresh customers
+            Refresh Customers
           </button>
         </div>
       </section>
