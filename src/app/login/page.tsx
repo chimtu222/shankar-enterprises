@@ -13,33 +13,129 @@ export default function LoginPage() {
   const [error, setError] = useState("");
 
   const handleLogin = async () => {
-    setError("");
+  setError("");
 
-    const { data, error } = await supabase
-      .from("users")
-      .select("*")
-      .eq("phone", phone)
-      .eq("password", password)
-      .single();
+  const cleanedPhone =
+    phone.trim();
 
-    if (error || !data) {
-      setError("Invalid Phone Number or Password");
+  const cleanedPassword =
+    password.trim();
+
+  if (
+    !cleanedPhone ||
+    !cleanedPassword
+  ) {
+    setError(
+      "Enter phone number and password."
+    );
+
+    return;
+  }
+
+  const {
+    data,
+    error: loginError,
+  } = await supabase.rpc(
+    "customer_login",
+    {
+      p_phone:
+        cleanedPhone,
+
+      p_password:
+        cleanedPassword,
+    }
+  );
+
+  if (loginError) {
+    console.error(
+      "Customer login RPC error:",
+      loginError
+    );
+
+    setError(
+      "Unable to log in right now."
+    );
+
+    return;
+  }
+
+  if (!data?.success) {
+    if (
+      data?.code ===
+      "ACCOUNT_LOCKED"
+    ) {
+      const lockTime =
+        data.locked_until
+          ? new Date(
+              data.locked_until
+            ).toLocaleString(
+              "en-IN",
+              {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              }
+            )
+          : null;
+
+      setError(
+        lockTime
+          ? `Too many failed attempts. Try again after ${lockTime}.`
+          : data.message
+      );
+
       return;
     }
 
-    if (!data.is_active) {
-      setError("Account Disabled");
+    if (
+      data?.code ===
+      "INVALID_CREDENTIALS"
+    ) {
+      const remaining =
+        Number(
+          data.remaining_attempts ??
+            0
+        );
+
+      setError(
+        `Invalid Phone Number or Password. ${remaining} attempt${
+          remaining === 1
+            ? ""
+            : "s"
+        } remaining.`
+      );
+
       return;
     }
 
-    localStorage.setItem("user", JSON.stringify(data));
+    setError(
+      data?.message ??
+        "Unable to log in."
+    );
 
-    if (data.role === "ADMIN") {
-      router.push("/SatyahiShivheibHai");
-    } else {
-      router.push("/products");
-    }
-  };
+    return;
+  }
+
+  const user =
+    data.user;
+
+  localStorage.setItem(
+    "user",
+    JSON.stringify(user)
+  );
+
+  if (user.role === "ADMIN") {
+    router.push(
+      "/SatyahiShivheibHai"
+    );
+  } else {
+    router.push(
+      "/products"
+    );
+  }
+};
 
   return (
     <div className="min-h-screen bg-[#eef6f5] flex items-center justify-center px-4">

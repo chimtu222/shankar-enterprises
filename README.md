@@ -1248,6 +1248,17 @@ PHONE NUMBER            Customer phone
 TEMPORARY PASSWORD      Current custom-login password
 CUSTOMER ADDRESS        Customer address
 ```
-
+# 11. Update User Access & allow him loging in
+```sql
+update public.users
+set is_active = true
+where user_id = 'REPLACE_CUSTOMER_ID'
+  and role = 'CUSTOMER'
+returning
+  user_id,
+  name,
+  phone,
+  is_active;
+```
 Always run the matching `SELECT` first and verify that exactly the intended record is returned.
 
